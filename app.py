@@ -26,7 +26,7 @@ session_state: dict[str, dict[str, str]] = {}
 state_lock = threading.Lock()
 
 
-def _newton_call(endpoint: str, expression: str) -> str | None:
+def _call_newton_api(endpoint: str, expression: str) -> str | None:
     try:
         url = f"{NEWTON_API}/{endpoint}/{quote_plus(expression)}"
         response = requests.get(url, timeout=10)
@@ -60,12 +60,12 @@ def check_answer_with_newton(user_answer: str, expected_integrand: str) -> bool:
     if not cleaned:
         return False
 
-    derived = _newton_call("derive", cleaned)
+    derived = _call_newton_api("derive", cleaned)
     if not derived:
         return False
 
-    simplified_expected = _newton_call("simplify", expected_integrand)
-    simplified_derived = _newton_call("simplify", derived)
+    simplified_expected = _call_newton_api("simplify", expected_integrand)
+    simplified_derived = _call_newton_api("simplify", derived)
 
     if not simplified_expected or not simplified_derived:
         return False
@@ -79,10 +79,10 @@ def _render_integral_mathjax(integrand_latex: str) -> str:
     return f"\\int {integrand_latex}\\,dx"
 
 
-def _easy_pool() -> list[dict[str, str]]:
-    a = random.randint(1, 6)
-    b = random.randint(1, 5)
-    n = random.randint(1, 3)
+def _easy_pool(rng: random.Random) -> list[dict[str, str]]:
+    a = rng.randint(1, 6)
+    b = rng.randint(1, 5)
+    n = rng.randint(1, 3)
     return [
         {
             "expression": f"{a}*x*({b}+x^2)^{n}",
@@ -95,9 +95,9 @@ def _easy_pool() -> list[dict[str, str]]:
     ]
 
 
-def _medium_pool() -> list[dict[str, str]]:
-    a = random.randint(1, 4)
-    b = random.randint(1, 4)
+def _medium_pool(rng: random.Random) -> list[dict[str, str]]:
+    a = rng.randint(1, 4)
+    b = rng.randint(1, 4)
     return [
         {
             "expression": f"{a}*x*sin({b}*x)",
@@ -110,9 +110,9 @@ def _medium_pool() -> list[dict[str, str]]:
     ]
 
 
-def _hard_pool() -> list[dict[str, str]]:
-    a = random.randint(1, 3)
-    b = random.randint(1, 4)
+def _hard_pool(rng: random.Random) -> list[dict[str, str]]:
+    a = rng.randint(1, 3)
+    b = rng.randint(1, 4)
     return [
         {
             "expression": f"{a}*x^2*e^({b}*x)",
@@ -125,8 +125,8 @@ def _hard_pool() -> list[dict[str, str]]:
     ]
 
 
-def _newton_pool() -> list[dict[str, str]]:
-    a = random.randint(1, 4)
+def _newton_pool(rng: random.Random) -> list[dict[str, str]]:
+    a = rng.randint(1, 4)
     return [
         {
             "expression": f"{a}*x*ln(x)",
@@ -139,8 +139,9 @@ def _newton_pool() -> list[dict[str, str]]:
     ]
 
 
-def generate_integral(level: str) -> dict[str, str]:
+def generate_integral(level: str, rng: random.Random | None = None) -> dict[str, str]:
     level = level.lower()
+    rng = rng or random.Random()
     pools = {
         "easy": _easy_pool,
         "medium": _medium_pool,
@@ -149,8 +150,8 @@ def generate_integral(level: str) -> dict[str, str]:
     }
     if level not in pools:
         level = "easy"
-    challenge = random.choice(pools[level]())
-    solution = _newton_call("integrate", challenge["expression"]) or "Unavailable"
+    challenge = rng.choice(pools[level](rng))
+    solution = _call_newton_api("integrate", challenge["expression"]) or "Unavailable"
     challenge["solution"] = solution
     return challenge
 
@@ -183,9 +184,7 @@ def get_daily_integral(level: str, day: date | None = None) -> dict[str, str]:
         if key in level_data:
             return level_data[key]
 
-        random.seed(f"{level}:{key}")
-        challenge = generate_integral(level)
-        random.seed()
+        challenge = generate_integral(level, rng=random.Random(f"{level}:{key}"))
 
         level_data[key] = {
             "expression": challenge["expression"],
