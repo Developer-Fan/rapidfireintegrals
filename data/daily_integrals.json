@@ -6,11 +6,25 @@
       "solution": "3 log(x^2 + 2)"
     }
   },
+  "hard": {
+    "2026-05-31": {
+      "expression": "3*ln(x)",
+      "integral": "\\displaystyle \\int 3\\ln(x)\\,dx",
+      "solution": "3*x*(log(x) - 1)"
+    }
+  },
   "medium": {
     "2026-05-31": {
       "expression": "2/(1+x^2)",
       "integral": "\\displaystyle \\int \\frac{2}{1+x^2}\\,dx",
       "solution": "2*atan(x)"
+    }
+  },
+  "newton": {
+    "2026-05-31": {
+      "expression": "2/(x^2+2^2)",
+      "integral": "\\displaystyle \\int \\frac{2}{x^2+2^2}\\,dx",
+      "solution": "atan(x/2)"
     }
   }
 }

@@ -386,6 +386,124 @@
         transform: translateY(-1px);
       }
 
+      .result-overlay {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        background: rgba(2, 8, 16, 0.58);
+        backdrop-filter: blur(5px);
+        z-index: 80;
+      }
+
+      .result-overlay[hidden] {
+        display: none;
+      }
+
+      .result-modal {
+        width: min(520px, 100%);
+        border-radius: 22px;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        box-shadow: var(--shadow);
+        padding: 22px;
+      }
+
+      .result-modal h3 {
+        margin: 0;
+        font-size: clamp(1.4rem, 3vw, 2rem);
+        font-family: 'Fraunces', 'Georgia', serif;
+      }
+
+      .result-modal p {
+        margin: 10px 0 0;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .result-math {
+        margin-top: 14px;
+        min-height: 90px;
+        font-size: clamp(1.3rem, 2.1vw, 1.9rem);
+      }
+
+      .result-math[hidden] {
+        display: none;
+      }
+
+      .result-modal.correct {
+        border-color: color-mix(in srgb, var(--success) 55%, var(--panel-border));
+      }
+
+      .result-modal.wrong {
+        border-color: color-mix(in srgb, var(--danger) 55%, var(--panel-border));
+      }
+
+      .result-actions {
+        margin-top: 18px;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .result-actions button {
+        min-width: 140px;
+      }
+
+      .result-actions .secondary {
+        background: linear-gradient(180deg, var(--link-bg), color-mix(in srgb, var(--link-bg) 70%, transparent));
+        border-color: var(--link-border);
+        color: var(--link-text);
+      }
+
+      .shake {
+        animation: tremble 420ms ease;
+      }
+
+      @keyframes tremble {
+        0% { transform: translateX(0); }
+        20% { transform: translateX(-8px); }
+        40% { transform: translateX(7px); }
+        60% { transform: translateX(-6px); }
+        80% { transform: translateX(4px); }
+        100% { transform: translateX(0); }
+      }
+
+      .confetti-layer {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        overflow: hidden;
+        z-index: 90;
+      }
+
+      .confetti {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 10px;
+        height: 14px;
+        border-radius: 2px;
+        opacity: 0.9;
+        transform: translate(-50%, -50%);
+        animation-name: burst;
+        animation-timing-function: cubic-bezier(0.2, 0.75, 0.2, 1);
+        animation-fill-mode: forwards;
+      }
+
+      @keyframes burst {
+        0% {
+          transform: translate(-50%, -50%) scale(0.8) rotate(0deg);
+          opacity: 1;
+        }
+        100% {
+          transform: translate(calc(-50% + var(--tx, 0px)), calc(-50% + var(--ty, 0px))) scale(1) rotate(var(--spin, 720deg));
+          opacity: 0;
+        }
+      }
+
       @media (max-width: 920px) {
         .hero,
         .grid,
@@ -421,10 +539,15 @@
         button {
           width: 100%;
         }
+
+        .result-actions button {
+          width: 100%;
+        }
       }
     </style>
   </head>
   <body>
+    <div id="confetti-layer" class="confetti-layer" aria-hidden="true"></div>
     <main class="shell">
       <section class="hero">
         <div>
@@ -524,6 +647,18 @@
       <p class="fine-print">Tip: equivalent antiderivatives are accepted, including versions with an added constant.</p>
     </main>
 
+    <div id="result-overlay" class="result-overlay" hidden>
+      <div id="result-modal" class="result-modal" role="dialog" aria-modal="true" aria-labelledby="result-title">
+        <h3 id="result-title">Result</h3>
+        <p id="result-message"></p>
+        <div id="result-math" class="math-block result-math is-empty" hidden></div>
+        <div class="result-actions">
+          <button id="result-primary" type="button"></button>
+          <button id="result-secondary" class="secondary" type="button"></button>
+        </div>
+      </div>
+    </div>
+
     <script>
       const socket = io();
       const integralNode = document.getElementById('integral');
@@ -533,7 +668,17 @@
       const modeNode = document.getElementById('mode');
       const difficultyNode = document.getElementById('difficulty');
       const themeToggleNode = document.getElementById('theme-toggle');
+      const resultOverlayNode = document.getElementById('result-overlay');
+      const resultModalNode = document.getElementById('result-modal');
+      const resultTitleNode = document.getElementById('result-title');
+      const resultMessageNode = document.getElementById('result-message');
+      const resultMathNode = document.getElementById('result-math');
+      const resultPrimaryNode = document.getElementById('result-primary');
+      const resultSecondaryNode = document.getElementById('result-secondary');
+      const confettiLayerNode = document.getElementById('confetti-layer');
       const themeStorageKey = 'rapidfireintegrals-theme';
+      let activeLevel = 'easy';
+      let activeMode = 'practice';
 
       function getPreferredTheme() {
         const savedTheme = window.localStorage.getItem(themeStorageKey);
@@ -579,6 +724,80 @@
         typesetNode(node);
       }
 
+      function hideResultPopup() {
+        resultOverlayNode.hidden = true;
+      }
+
+      function createConfettiBurst() {
+        const colors = ['#ff6b6b', '#ffd166', '#06d6a0', '#4dabf7', '#c77dff', '#f4a261'];
+        for (let index = 0; index < 90; index += 1) {
+          const piece = document.createElement('span');
+          piece.className = 'confetti';
+          piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+          piece.style.animationDuration = `${700 + Math.random() * 650}ms`;
+          const angle = Math.random() * Math.PI * 2;
+          const radius = 140 + Math.random() * 420;
+          piece.style.setProperty('--tx', `${Math.cos(angle) * radius}px`);
+          piece.style.setProperty('--ty', `${Math.sin(angle) * radius}px`);
+          piece.style.setProperty('--spin', `${(Math.random() > 0.5 ? 1 : -1) * (360 + Math.random() * 900)}deg`);
+          confettiLayerNode.appendChild(piece);
+          piece.addEventListener('animationend', () => piece.remove(), { once: true });
+        }
+      }
+
+      function requestAnotherOne() {
+        hideResultPopup();
+        setStatus('Fetching another one...');
+        answerNode.value = '';
+        renderMath();
+        socket.emit('request_integral', { level: activeLevel });
+      }
+
+      function showResultPopup(payload) {
+        const isCorrect = Boolean(payload.correct);
+        resultOverlayNode.hidden = false;
+        resultModalNode.classList.remove('correct', 'wrong', 'shake');
+        resultModalNode.classList.add(isCorrect ? 'correct' : 'wrong');
+        const isSolution = Boolean(payload.is_solution);
+        resultTitleNode.textContent = isCorrect ? 'Correct' : (isSolution ? 'Solution' : 'Not Quite');
+        resultMessageNode.textContent = payload.message || (isCorrect ? 'Well done!' : 'Try again.');
+        resultMathNode.hidden = true;
+        resultMathNode.textContent = '';
+        resultMathNode.classList.add('is-empty');
+
+        if (isSolution && payload.solution_latex) {
+          setMath(resultMathNode, `\\displaystyle ${payload.solution_latex} + C`);
+          resultMathNode.hidden = false;
+        }
+
+        if (isCorrect) {
+          resultPrimaryNode.textContent = 'Another One';
+          resultSecondaryNode.textContent = 'Close';
+          resultPrimaryNode.onclick = requestAnotherOne;
+          resultSecondaryNode.onclick = hideResultPopup;
+          createConfettiBurst();
+        } else if (isSolution) {
+          resultPrimaryNode.textContent = 'Another One';
+          resultSecondaryNode.textContent = 'Close';
+          resultPrimaryNode.onclick = requestAnotherOne;
+          resultSecondaryNode.onclick = hideResultPopup;
+        } else {
+          resultPrimaryNode.textContent = 'Try Again';
+          resultSecondaryNode.textContent = 'Give Up';
+          resultPrimaryNode.onclick = () => {
+            hideResultPopup();
+            answerNode.focus();
+          };
+          resultSecondaryNode.onclick = () => {
+            setStatus('Revealing the solution...');
+            socket.emit('give_up');
+          };
+          requestAnimationFrame(() => {
+            resultModalNode.classList.add('shake');
+          });
+        }
+      }
+
       function renderMath() {
         const latex = answerNode.value.trim();
         if (!latex) {
@@ -597,26 +816,33 @@
         renderMath();
         setStatus('');
         answerNode.focus();
+        hideResultPopup();
       });
 
       document.querySelectorAll('.rapid').forEach((button) => {
         button.addEventListener('click', () => {
+          activeMode = 'practice';
+          activeLevel = button.dataset.level;
           modeNode.textContent = 'Practice';
           difficultyNode.textContent = button.textContent;
           setStatus('Fetching a fresh integral...');
           answerNode.value = '';
           renderMath();
+          hideResultPopup();
           socket.emit('request_integral', { level: button.dataset.level });
         });
       });
 
       document.querySelectorAll('.daily').forEach((button) => {
         button.addEventListener('click', () => {
+          activeMode = 'daily';
+          activeLevel = button.dataset.level;
           modeNode.textContent = 'Daily drill';
           difficultyNode.textContent = button.textContent;
           setStatus('Fetching today’s challenge...');
           answerNode.value = '';
           renderMath();
+          hideResultPopup();
           socket.emit('request_daily', { level: button.dataset.level });
         });
       });
@@ -631,11 +857,21 @@
         socket.emit('give_up');
       });
 
+      resultOverlayNode.addEventListener('click', (event) => {
+        if (event.target === resultOverlayNode) {
+          hideResultPopup();
+        }
+      });
+
       socket.on('integral', (payload) => {
         if (payload.level?.startsWith('daily-')) {
+          activeMode = 'daily';
+          activeLevel = payload.level.replace(/^daily-/, '');
           modeNode.textContent = 'Daily drill';
           difficultyNode.textContent = prettifyLevel(payload.level);
         } else {
+          activeMode = 'practice';
+          activeLevel = payload.level || activeLevel;
           modeNode.textContent = 'Practice';
           difficultyNode.textContent = prettifyLevel(payload.level);
         }
@@ -646,6 +882,7 @@
 
       socket.on('result', (payload) => {
         setStatus(payload.message, payload.correct ? 'success' : 'error');
+        showResultPopup(payload);
       });
 
       renderMath();

@@ -12,16 +12,20 @@ class AppTests(unittest.TestCase):
         self.client = app.app.test_client()
 
     def test_integral_pools_have_more_variety(self):
-        self.assertGreaterEqual(len(app._easy_pool(app.random.Random(1))), 5)
-        self.assertGreaterEqual(len(app._medium_pool(app.random.Random(2))), 6)
-        self.assertGreaterEqual(len(app._hard_pool(app.random.Random(3))), 6)
-        self.assertGreaterEqual(len(app._newton_pool(app.random.Random(4))), 6)
+        self.assertGreaterEqual(len(app._easy_pool(app.random.Random(1))), 11)
+        self.assertGreaterEqual(len(app._medium_pool(app.random.Random(2))), 12)
+        self.assertGreaterEqual(len(app._hard_pool(app.random.Random(3))), 14)
+        self.assertGreaterEqual(len(app._newton_pool(app.random.Random(4))), 13)
 
     def test_check_answer_uses_sympy(self):
         self.assertTrue(app.check_answer_with_newton("x^2", "2*x"))
         self.assertTrue(app.check_answer_with_newton(r"\frac{x^2}{2}", "x"))
         self.assertTrue(app.check_answer_with_newton(r"3\ln(x^2+1)+C", "6*x/(1+x^2)"))
         self.assertTrue(app.check_answer_with_newton(r"e^{kx}/k", r"e^{kx}"))
+        self.assertTrue(app.check_answer_with_newton(r"\sin{kx}", r"k*cos(kx)"))
+        self.assertTrue(app.check_answer_with_newton(r"\cos{kx}", r"-k*sin(kx)"))
+        self.assertTrue(app.check_answer_with_newton(r"\tan{x}", r"sec(x)^2"))
+        self.assertTrue(app.check_answer_with_newton(r"\sech{x}", r"-sech(x)*tanh(x)"))
         self.assertTrue(app.check_answer_with_newton(r"\sqrt{x}", "1/(2*sqrt(x))"))
         self.assertTrue(app.check_answer_with_newton(r"\frac{1}{\sqrt{x}}", "-1/(2*x^(3/2))"))
 

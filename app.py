@@ -9,12 +9,16 @@ import time
 from datetime import date
 from pathlib import Path
 
-try:
-    import eventlet
+eventlet = None
+SOCKETIO_ASYNC_MODE = os.environ.get("RAPIDFIRE_ASYNC_MODE", "threading").strip().lower()
+if SOCKETIO_ASYNC_MODE == "eventlet":
+    try:
+        import eventlet as _eventlet
 
-    eventlet.monkey_patch()
-except Exception:
-    eventlet = None
+        _eventlet.monkey_patch()
+        eventlet = _eventlet
+    except Exception:
+        SOCKETIO_ASYNC_MODE = "threading"
 
 import sympy as sp
 from flask import Flask, jsonify, render_template, request
@@ -28,8 +32,8 @@ from sympy.parsing.sympy_parser import (
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("RAPIDFIRE_SECRET_KEY", "dev-secret-change-me")
-# Prefer eventlet for websocket support; fall back to threading if not available.
-socketio = SocketIO(app, async_mode="eventlet" if eventlet is not None else "threading")
+# Default to threading for stable dev behavior; opt into eventlet via RAPIDFIRE_ASYNC_MODE=eventlet.
+socketio = SocketIO(app, async_mode=SOCKETIO_ASYNC_MODE, cors_allowed_origins="*")
 
 DATA_FILE = Path(__file__).parent / "data" / "daily_integrals.json"
 SUPPORTED_LEVELS = {"easy", "medium", "hard", "newton"}
@@ -51,7 +55,16 @@ SYMPY_LOCAL_DICT = {
     "ln": sp.log,
     "log": sp.log,
     "exp": sp.exp,
+    "sinh": sp.sinh,
+    "cosh": sp.cosh,
+    "tanh": sp.tanh,
+    "sech": sp.sech,
+    "csch": sp.csch,
+    "coth": sp.coth,
     "sqrt": sp.sqrt,
+    "asinh": sp.asinh,
+    "acosh": sp.acosh,
+    "atanh": sp.atanh,
     "arcsin": sp.asin,
     "arccos": sp.acos,
     "arctan": sp.atan,
@@ -72,7 +85,11 @@ def _clean_expression(expression: str) -> str:
     expression = expression.replace("\\div", "/")
     expression = expression.replace("−", "-")
     expression = re.sub(r"\s*([+\-])\s*[Cc]\s*$", "", expression)
-    expression = re.sub(r"\\(sin|cos|tan|sec|csc|cot|ln|log|exp|arcsin|arccos|arctan|sqrt)", r"\1", expression)
+    expression = re.sub(
+        r"\\(arcsin|arccos|arctan|asinh|acosh|atanh|sinh|cosh|tanh|sech|csch|coth|sin|cos|tan|sec|csc|cot|ln|log|exp|sqrt)",
+        r"\1",
+        expression,
+    )
     expression = re.sub(r"\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}", r"(\1)/(\2)", expression)
     expression = re.sub(r"^\\\((.*)\\\)$", r"\1", expression)
     expression = re.sub(r"^\\\[(.*)\\\]$", r"\1", expression)
@@ -86,8 +103,24 @@ def _clean_expression(expression: str) -> str:
 
 def _prepare_for_sympy(expression: str) -> str:
     cleaned = _clean_expression(expression)
+    function_pattern = (
+        r"arcsin|arccos|arctan|asinh|acosh|atanh|"
+        r"sinh|cosh|tanh|sech|csch|coth|"
+        r"sin|cos|tan|sec|csc|cot|ln|log|exp|sqrt"
+    )
+    cleaned = re.sub(
+        rf"\b({function_pattern})\s*\^\s*\{{([^{{}}]+)\}}\s*\{{([^{{}}]+)\}}",
+        r"(\1(\3))**(\2)",
+        cleaned,
+    )
+    cleaned = re.sub(
+        rf"\b({function_pattern})\s*\{{([^{{}}]+)\}}",
+        r"\1(\2)",
+        cleaned,
+    )
     cleaned = re.sub(r"(?<![A-Za-z0-9_])e\^\{([^{}]+)\}", r"E**(\1)", cleaned)
     cleaned = re.sub(r"(?<![A-Za-z0-9_])e\^\(([^()]+)\)", r"E**(\1)", cleaned)
+    cleaned = re.sub(r"(?<![A-Za-z0-9_])e\^([A-Za-z0-9_]+)", r"E**(\1)", cleaned)
     cleaned = re.sub(r"sqrt\[(\d+)\]\{([^{}]+)\}", r"root(\2, \1)", cleaned)
     cleaned = re.sub(r"sqrt\s*\{([^{}]+)\}", r"sqrt(\1)", cleaned)
     cleaned = re.sub(r"sqrt\s*\(([^()]+)\)", r"sqrt(\1)", cleaned)
@@ -203,6 +236,7 @@ def _latex_fraction(numerator: str, denominator: str) -> str:
 def _easy_pool(rng: random.Random) -> list[dict[str, str]]:
     a = rng.randint(1, 6)
     b = rng.randint(2, 6)
+    c = rng.randint(1, 5)
     n = rng.randint(2, 5)
     return [
         {
@@ -225,6 +259,30 @@ def _easy_pool(rng: random.Random) -> list[dict[str, str]]:
             "expression": f"{a}*x/({b}+x^2)",
             "integral": _render_integral_mathjax(_latex_fraction(f"{a}x", f"{b}+x^2")),
         },
+        {
+            "expression": f"{a}/({b}+x)",
+            "integral": _render_integral_mathjax(_latex_fraction(str(a), f"{b}+x")),
+        },
+        {
+            "expression": f"{a}/sqrt(x)",
+            "integral": _render_integral_mathjax(_latex_fraction(str(a), "\\sqrt{x}")),
+        },
+        {
+            "expression": f"{a}*sec({c}*x)^2",
+            "integral": _render_integral_mathjax(f"{a}\\sec^2({c}x)"),
+        },
+        {
+            "expression": f"{a}*csc({c}*x)^2",
+            "integral": _render_integral_mathjax(f"{a}\\csc^2({c}x)"),
+        },
+        {
+            "expression": f"{a}*(x+{c})^{n}",
+            "integral": _render_integral_mathjax(f"{a}(x+{c})^{{{n}}}"),
+        },
+        {
+            "expression": f"{a}*sqrt(x+{c})",
+            "integral": _render_integral_mathjax(f"{a}\\sqrt{{x+{c}}}"),
+        },
     ]
 
 
@@ -232,6 +290,7 @@ def _medium_pool(rng: random.Random) -> list[dict[str, str]]:
     a = rng.randint(1, 4)
     b = rng.randint(1, 5)
     c = rng.randint(2, 5)
+    d = rng.randint(1, 4)
     return [
         {
             "expression": f"{a}*x*sin({b}*x)",
@@ -257,6 +316,30 @@ def _medium_pool(rng: random.Random) -> list[dict[str, str]]:
             "expression": f"{a}*x/sqrt({c}+x^2)",
             "integral": _render_integral_mathjax(_latex_fraction(f"{a}x", f"\\sqrt{{{c}+x^2}}")),
         },
+        {
+            "expression": f"{a}*sec({b}*x)*tan({b}*x)",
+            "integral": _render_integral_mathjax(f"{a}\\sec({b}x)\\tan({b}x)"),
+        },
+        {
+            "expression": f"{a}*csc({b}*x)*cot({b}*x)",
+            "integral": _render_integral_mathjax(f"{a}\\csc({b}x)\\cot({b}x)"),
+        },
+        {
+            "expression": f"{a}*x/(1+x^{d})",
+            "integral": _render_integral_mathjax(_latex_fraction(f"{a}x", f"1+x^{d}")),
+        },
+        {
+            "expression": f"{a}*exp({b}*x)/(1+exp({b}*x))",
+            "integral": _render_integral_mathjax(_latex_fraction(f"{a}e^{{{b}x}}", f"1+e^{{{b}x}}")),
+        },
+        {
+            "expression": f"{a}*sinh({b}*x)",
+            "integral": _render_integral_mathjax(f"{a}\\sinh({b}x)"),
+        },
+        {
+            "expression": f"{a}*cosh({b}*x)",
+            "integral": _render_integral_mathjax(f"{a}\\cosh({b}x)"),
+        },
     ]
 
 
@@ -264,6 +347,7 @@ def _hard_pool(rng: random.Random) -> list[dict[str, str]]:
     a = rng.randint(1, 3)
     b = rng.randint(1, 4)
     c = rng.randint(1, 4)
+    d = rng.randint(2, 5)
     return [
         {
             "expression": f"{a}*x^2*e^({b}*x)",
@@ -289,6 +373,34 @@ def _hard_pool(rng: random.Random) -> list[dict[str, str]]:
             "expression": f"{a}*e^({b}*x)*sin({c}*x)",
             "integral": _render_integral_mathjax(f"{a}e^{{{b}x}}\\sin({c}x)"),
         },
+        {
+            "expression": f"{a}*e^({b}*x)*cos({c}*x)",
+            "integral": _render_integral_mathjax(f"{a}e^{{{b}x}}\\cos({c}x)"),
+        },
+        {
+            "expression": f"{a}*x^3*sin({b}*x)",
+            "integral": _render_integral_mathjax(f"{a}x^3\\sin({b}x)"),
+        },
+        {
+            "expression": f"{a}*x^3*cos({b}*x)",
+            "integral": _render_integral_mathjax(f"{a}x^3\\cos({b}x)"),
+        },
+        {
+            "expression": f"{a}*x^2/(1+x^{d})",
+            "integral": _render_integral_mathjax(_latex_fraction(f"{a}x^2", f"1+x^{d}")),
+        },
+        {
+            "expression": f"{a}*sech({b}*x)^2",
+            "integral": _render_integral_mathjax(f"{a}\\operatorname{{sech}}^2({b}x)"),
+        },
+        {
+            "expression": f"{a}*csch({b}*x)^2",
+            "integral": _render_integral_mathjax(f"{a}\\operatorname{{csch}}^2({b}x)"),
+        },
+        {
+            "expression": f"{a}*tanh({b}*x)",
+            "integral": _render_integral_mathjax(f"{a}\\tanh({b}x)"),
+        },
     ]
 
 
@@ -296,6 +408,7 @@ def _newton_pool(rng: random.Random) -> list[dict[str, str]]:
     a = rng.randint(1, 4)
     b = rng.randint(1, 4)
     c = rng.randint(2, 5)
+    d = rng.randint(2, 5)
     return [
         {
             "expression": f"{a}/x",
@@ -320,6 +433,30 @@ def _newton_pool(rng: random.Random) -> list[dict[str, str]]:
         {
             "expression": f"{a}*e^({b}*x)*cos({c}*x)",
             "integral": _render_integral_mathjax(f"{a}e^{{{b}x}}\\cos({c}x)"),
+        },
+        {
+            "expression": f"{a}/(x^2+{d}^2)",
+            "integral": _render_integral_mathjax(_latex_fraction(str(a), f"x^2+{d}^2")),
+        },
+        {
+            "expression": f"{a}/sqrt(x^2+{d})",
+            "integral": _render_integral_mathjax(_latex_fraction(str(a), f"\\sqrt{{x^2+{d}}}")),
+        },
+        {
+            "expression": f"{a}*sech({b}*x)*tanh({b}*x)",
+            "integral": _render_integral_mathjax(f"{a}\\operatorname{{sech}}({b}x)\\tanh({b}x)"),
+        },
+        {
+            "expression": f"{a}*csch({b}*x)*coth({b}*x)",
+            "integral": _render_integral_mathjax(f"{a}\\operatorname{{csch}}({b}x)\\coth({b}x)"),
+        },
+        {
+            "expression": f"{a}*exp({b}*x)/(1+exp({b}*x)^2)",
+            "integral": _render_integral_mathjax(_latex_fraction(f"{a}e^{{{b}x}}", f"1+e^{{2{b}x}}")),
+        },
+        {
+            "expression": f"{a}*(x^2+{d})^{-1}",
+            "integral": _render_integral_mathjax(_latex_fraction(str(a), f"x^2+{d}")),
         },
     ]
 
@@ -478,6 +615,8 @@ def handle_give_up():
         {
             "correct": False,
             "message": f"Solution: {challenge['solution']} + C",
+            "is_solution": True,
+            "solution_latex": _expression_to_latex(challenge["solution"]),
         },
     )
 
