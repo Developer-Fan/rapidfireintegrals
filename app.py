@@ -3,45 +3,160 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import threading
 import time
 from datetime import date
 from pathlib import Path
-from urllib.parse import quote_plus
 
-import requests
+try:
+    import eventlet
+
+    eventlet.monkey_patch()
+except Exception:
+    eventlet = None
+
+import sympy as sp
 from flask import Flask, jsonify, render_template, request
 from flask_socketio import SocketIO, emit
+from sympy.parsing.sympy_parser import (
+    convert_xor,
+    implicit_multiplication_application,
+    parse_expr,
+    standard_transformations,
+)
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("RAPIDFIRE_SECRET_KEY", "dev-secret-change-me")
-socketio = SocketIO(app, async_mode="threading")
+# Prefer eventlet for websocket support; fall back to threading if not available.
+socketio = SocketIO(app, async_mode="eventlet" if eventlet is not None else "threading")
 
-NEWTON_API = "https://newton.vercel.app/api/v2"
 DATA_FILE = Path(__file__).parent / "data" / "daily_integrals.json"
 SUPPORTED_LEVELS = {"easy", "medium", "hard", "newton"}
 SESSION_TTL_SECONDS = 3600
+SYMPY_TRANSFORMATIONS = standard_transformations + (
+    implicit_multiplication_application,
+    convert_xor,
+)
+SYMPY_LOCAL_DICT = {
+    "E": sp.E,
+    "I": sp.I,
+    "pi": sp.pi,
+    "sin": sp.sin,
+    "cos": sp.cos,
+    "tan": sp.tan,
+    "sec": sp.sec,
+    "csc": sp.csc,
+    "cot": sp.cot,
+    "ln": sp.log,
+    "log": sp.log,
+    "exp": sp.exp,
+    "sqrt": sp.sqrt,
+    "arcsin": sp.asin,
+    "arccos": sp.acos,
+    "arctan": sp.atan,
+    "Abs": sp.Abs,
+    "root": sp.root,
+}
 
 session_state: dict[str, dict[str, str]] = {}
 state_lock = threading.Lock()
 
 
-def _call_newton_api(endpoint: str, expression: str) -> str | None:
+def _clean_expression(expression: str) -> str:
+    expression = expression.strip()
+    expression = expression.replace("$", "")
+    expression = expression.replace("\\left", "").replace("\\right", "")
+    expression = expression.replace("\\,", "").replace("\\!", "")
+    expression = expression.replace("\\cdot", "*").replace("\\times", "*")
+    expression = expression.replace("\\div", "/")
+    expression = expression.replace("−", "-")
+    expression = re.sub(r"\s*([+\-])\s*[Cc]\s*$", "", expression)
+    expression = re.sub(r"\\(sin|cos|tan|sec|csc|cot|ln|log|exp|arcsin|arccos|arctan|sqrt)", r"\1", expression)
+    expression = re.sub(r"\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}", r"(\1)/(\2)", expression)
+    expression = re.sub(r"^\\\((.*)\\\)$", r"\1", expression)
+    expression = re.sub(r"^\\\[(.*)\\\]$", r"\1", expression)
+    expression = re.sub(r"(?<=\d)(?=[A-Za-z(])", "*", expression)
+    expression = re.sub(r"(?<=[A-Za-z\)])(?=\d)", "*", expression)
+    expression = re.sub(r"(?<=[xX)])(?=\()", "*", expression)
+    expression = re.sub(r"(?<=\d)(?=\()", "*", expression)
+    expression = re.sub(r"(?<=\))(?=[A-Za-z(])", "*", expression)
+    return expression.strip()
+
+
+def _prepare_for_sympy(expression: str) -> str:
+    cleaned = _clean_expression(expression)
+    cleaned = re.sub(r"(?<![A-Za-z0-9_])e\^\{([^{}]+)\}", r"E**(\1)", cleaned)
+    cleaned = re.sub(r"(?<![A-Za-z0-9_])e\^\(([^()]+)\)", r"E**(\1)", cleaned)
+    cleaned = re.sub(r"sqrt\[(\d+)\]\{([^{}]+)\}", r"root(\2, \1)", cleaned)
+    cleaned = re.sub(r"sqrt\s*\{([^{}]+)\}", r"sqrt(\1)", cleaned)
+    cleaned = re.sub(r"sqrt\s*\(([^()]+)\)", r"sqrt(\1)", cleaned)
+    cleaned = re.sub(r"\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}", r"(\1)/(\2)", cleaned)
+    cleaned = re.sub(r"\\pi\b", "pi", cleaned)
+    cleaned = re.sub(r"\be\b", "E", cleaned)
+    return cleaned
+
+
+def _parse_expression(expression: str) -> sp.Expr | None:
+    prepared = _prepare_for_sympy(expression)
+    if not prepared:
+        return None
+
     try:
-        url = f"{NEWTON_API}/{endpoint}/{quote_plus(expression)}"
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        return response.json().get("result")
-    except (requests.RequestException, ValueError):
+        return parse_expr(
+            prepared,
+            local_dict=SYMPY_LOCAL_DICT,
+            transformations=SYMPY_TRANSFORMATIONS,
+            evaluate=True,
+        )
+    except (SyntaxError, ValueError, TypeError):
         return None
 
 
-def _clean_expression(expression: str) -> str:
-    return expression.replace("$", "").replace("+ C", "").replace("+C", "").strip()
+def _expressions_equivalent(left: str, right: str) -> bool:
+    left_expr = _parse_expression(left)
+    right_expr = _parse_expression(right)
+    if left_expr is None or right_expr is None:
+        return False
+
+    try:
+        return sp.simplify(left_expr - right_expr) == 0
+    except Exception:
+        return False
 
 
-def _normalize_newton_expression(expression: str) -> str:
-    return "".join(expression.split())
+def _integrate_expression(expression: str, variable_name: str = "x") -> str:
+    parsed = _parse_expression(expression)
+    if parsed is None:
+        return "Unavailable"
+
+    if not re.fullmatch(r"[A-Za-z]\w*", variable_name):
+        return "Unavailable"
+
+    variable = sp.Symbol(variable_name)
+    try:
+        solution = sp.integrate(parsed, variable)
+    except Exception:
+        return "Unavailable"
+
+    if getattr(solution, "has", None) and solution.has(sp.Integral):
+        return "Unavailable"
+
+    try:
+        return sp.sstr(sp.simplify(solution))
+    except Exception:
+        return sp.sstr(solution)
+
+
+def _expression_to_latex(expression: str) -> str:
+    parsed = _parse_expression(expression)
+    if parsed is None:
+        return expression
+
+    try:
+        return sp.latex(parsed)
+    except Exception:
+        return expression
 
 
 def _prune_sessions_locked() -> None:
@@ -60,44 +175,63 @@ def check_answer_with_newton(user_answer: str, expected_integrand: str) -> bool:
     if not cleaned:
         return False
 
-    derived = _call_newton_api("derive", cleaned)
-    if not derived:
+    answer_expr = _parse_expression(cleaned)
+    expected_expr = _parse_expression(expected_integrand)
+    if answer_expr is None or expected_expr is None:
         return False
 
-    simplified_expected = _call_newton_api("simplify", expected_integrand)
-    simplified_derived = _call_newton_api("simplify", derived)
-
-    if not simplified_expected or not simplified_derived:
+    x = sp.Symbol("x")
+    try:
+        derived = sp.diff(answer_expr, x)
+    except Exception:
         return False
 
-    return _normalize_newton_expression(simplified_expected) == _normalize_newton_expression(
-        simplified_derived
-    )
+    try:
+        return sp.simplify(derived - expected_expr) == 0
+    except Exception:
+        return False
 
 
 def _render_integral_mathjax(integrand_latex: str) -> str:
-    return f"\\int {integrand_latex}\\,dx"
+    return rf"\displaystyle \int {integrand_latex}\,dx"
+
+
+def _latex_fraction(numerator: str, denominator: str) -> str:
+    return rf"\frac{{{numerator}}}{{{denominator}}}"
 
 
 def _easy_pool(rng: random.Random) -> list[dict[str, str]]:
     a = rng.randint(1, 6)
-    b = rng.randint(1, 5)
-    n = rng.randint(1, 3)
+    b = rng.randint(2, 6)
+    n = rng.randint(2, 5)
     return [
         {
-            "expression": f"{a}*x*({b}+x^2)^{n}",
-            "integral": _render_integral_mathjax(f"{a}x({b}+x^2)^{{{n}}}"),
+            "expression": f"{a}*x^{n}",
+            "integral": _render_integral_mathjax(f"{a}x^{{{n}}}"),
         },
         {
-            "expression": f"({a}*x)/(1+x^2)",
-            "integral": _render_integral_mathjax(fr"\\frac{{{a}x}}{{1+x^2}}"),
+            "expression": f"{a}*e^({b}*x)",
+            "integral": _render_integral_mathjax(f"{a}e^{{{b}x}}"),
+        },
+        {
+            "expression": f"{a}*sin({b}*x)",
+            "integral": _render_integral_mathjax(f"{a}\\sin({b}x)"),
+        },
+        {
+            "expression": f"{a}*cos({b}*x)",
+            "integral": _render_integral_mathjax(f"{a}\\cos({b}x)"),
+        },
+        {
+            "expression": f"{a}*x/({b}+x^2)",
+            "integral": _render_integral_mathjax(_latex_fraction(f"{a}x", f"{b}+x^2")),
         },
     ]
 
 
 def _medium_pool(rng: random.Random) -> list[dict[str, str]]:
     a = rng.randint(1, 4)
-    b = rng.randint(1, 4)
+    b = rng.randint(1, 5)
+    c = rng.randint(2, 5)
     return [
         {
             "expression": f"{a}*x*sin({b}*x)",
@@ -107,12 +241,29 @@ def _medium_pool(rng: random.Random) -> list[dict[str, str]]:
             "expression": f"{a}*x*cos({b}*x)",
             "integral": _render_integral_mathjax(f"{a}x\\cos({b}x)"),
         },
+        {
+            "expression": f"{a}*x*e^({b}*x)",
+            "integral": _render_integral_mathjax(f"{a}xe^{{{b}x}}"),
+        },
+        {
+            "expression": f"{a}/(1+x^2)",
+            "integral": _render_integral_mathjax(_latex_fraction(str(a), "1+x^2")),
+        },
+        {
+            "expression": f"{a}/sqrt(1-x^2)",
+            "integral": _render_integral_mathjax(f"{a}\\arcsin(x)"),
+        },
+        {
+            "expression": f"{a}*x/sqrt({c}+x^2)",
+            "integral": _render_integral_mathjax(_latex_fraction(f"{a}x", f"\\sqrt{{{c}+x^2}}")),
+        },
     ]
 
 
 def _hard_pool(rng: random.Random) -> list[dict[str, str]]:
     a = rng.randint(1, 3)
     b = rng.randint(1, 4)
+    c = rng.randint(1, 4)
     return [
         {
             "expression": f"{a}*x^2*e^({b}*x)",
@@ -122,19 +273,53 @@ def _hard_pool(rng: random.Random) -> list[dict[str, str]]:
             "expression": f"{a}*x^2*sin({b}*x)",
             "integral": _render_integral_mathjax(f"{a}x^2\\sin({b}x)"),
         },
-    ]
-
-
-def _newton_pool(rng: random.Random) -> list[dict[str, str]]:
-    a = rng.randint(1, 4)
-    return [
+        {
+            "expression": f"{a}*x^2*cos({b}*x)",
+            "integral": _render_integral_mathjax(f"{a}x^2\\cos({b}x)"),
+        },
+        {
+            "expression": f"{a}*ln(x)",
+            "integral": _render_integral_mathjax(f"{a}\\ln(x)"),
+        },
         {
             "expression": f"{a}*x*ln(x)",
             "integral": _render_integral_mathjax(f"{a}x\\ln(x)"),
         },
         {
-            "expression": f"({a}*x)/(1+x^4)",
-            "integral": _render_integral_mathjax(fr"\\frac{{{a}x}}{{1+x^4}}"),
+            "expression": f"{a}*e^({b}*x)*sin({c}*x)",
+            "integral": _render_integral_mathjax(f"{a}e^{{{b}x}}\\sin({c}x)"),
+        },
+    ]
+
+
+def _newton_pool(rng: random.Random) -> list[dict[str, str]]:
+    a = rng.randint(1, 4)
+    b = rng.randint(1, 4)
+    c = rng.randint(2, 5)
+    return [
+        {
+            "expression": f"{a}/x",
+            "integral": _render_integral_mathjax(f"{a}/x"),
+        },
+        {
+            "expression": f"{a}/(x*ln(x))",
+            "integral": _render_integral_mathjax(f"{a}/(x\\ln(x))"),
+        },
+        {
+            "expression": f"{a}*x/(1+x^2)",
+            "integral": _render_integral_mathjax(_latex_fraction(f"{a}x", "1+x^2")),
+        },
+        {
+            "expression": f"{a}*x/sqrt({b}^2-x^2)",
+            "integral": _render_integral_mathjax(_latex_fraction(f"{a}x", f"\\sqrt{{{b}^2-x^2}}")),
+        },
+        {
+            "expression": f"{a}/(1+({b}*x)^2)",
+            "integral": _render_integral_mathjax(f"{a}/(1+({b}x)^2)"),
+        },
+        {
+            "expression": f"{a}*e^({b}*x)*cos({c}*x)",
+            "integral": _render_integral_mathjax(f"{a}e^{{{b}x}}\\cos({c}x)"),
         },
     ]
 
@@ -151,7 +336,7 @@ def generate_integral(level: str, rng: random.Random | None = None) -> dict[str,
     if level not in pools:
         level = "easy"
     challenge = rng.choice(pools[level](rng))
-    solution = _call_newton_api("integrate", challenge["expression"]) or "Unavailable"
+    solution = _integrate_expression(challenge["expression"], "x")
     challenge["solution"] = solution
     return challenge
 
@@ -198,6 +383,22 @@ def get_daily_integral(level: str, day: date | None = None) -> dict[str, str]:
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/solver")
+def solver():
+    return render_template("solver.html")
+
+
+@app.post("/api/solve")
+def solve_api():
+    payload = request.get_json(silent=True) or request.form or {}
+    expression = str(payload.get("expression", ""))
+    variable = str(payload.get("variable", "x")).strip() or "x"
+    solution = _integrate_expression(expression, variable)
+    if solution == "Unavailable":
+        return jsonify({"solution": solution}), 400
+    return jsonify({"solution": solution, "latex": _expression_to_latex(solution)})
 
 
 @app.route("/api/daily/<level>")

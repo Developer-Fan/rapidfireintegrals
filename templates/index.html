@@ -4,50 +4,525 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Rapid Fire Integrals</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <script>
-      window.MathJax = { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] } };
+      window.MathJax = {
+        tex: {
+          inlineMath: [['$', '$'], ['\\(', '\\)']],
+          displayMath: [['\\[', '\\]']],
+          processEscapes: true,
+        },
+        options: {
+          skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+        },
+      };
     </script>
     <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <style>
-      body { font-family: Arial, sans-serif; margin: 2rem; max-width: 900px; }
-      .row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
-      button { padding: 0.5rem 0.7rem; }
-      textarea { width: 100%; min-height: 80px; }
-      #integral, #preview, #status { margin: 1rem 0; font-size: 1.1rem; }
-      .hint { color: #666; }
+      :root {
+        --bg-start: #050b16;
+        --bg-mid: #0a1626;
+        --bg-end: #08101d;
+        --body-grid: rgba(148, 170, 201, 0.09);
+        --panel: rgba(12, 23, 41, 0.82);
+        --panel-border: rgba(161, 189, 255, 0.18);
+        --metric: rgba(4, 10, 18, 0.38);
+        --metric-border: rgba(161, 189, 255, 0.12);
+        --button-bg-start: rgba(20, 36, 60, 0.9);
+        --button-bg-end: rgba(11, 21, 39, 0.98);
+        --button-border: rgba(161, 189, 255, 0.18);
+        --input-bg: rgba(4, 10, 18, 0.68);
+        --input-border: rgba(161, 189, 255, 0.16);
+        --math-bg-start: rgba(9, 17, 31, 0.8);
+        --math-bg-end: rgba(4, 10, 18, 0.88);
+        --text: #eef4ff;
+        --muted: #9db0cc;
+        --accent: #88d8ff;
+        --accent-2: #f5b76b;
+        --success: #7ddc9f;
+        --danger: #ff8e8e;
+        --link-bg: rgba(136, 216, 255, 0.12);
+        --link-border: rgba(136, 216, 255, 0.24);
+        --link-text: #88d8ff;
+        --shadow: 0 28px 90px rgba(0, 0, 0, 0.38);
+      }
+
+      html[data-theme='light'] {
+        --bg-start: #f5f7fb;
+        --bg-mid: #edf2f9;
+        --bg-end: #e0e8f3;
+        --body-grid: rgba(82, 101, 128, 0.12);
+        --panel: rgba(255, 255, 255, 0.88);
+        --panel-border: rgba(70, 92, 125, 0.16);
+        --metric: rgba(255, 255, 255, 0.74);
+        --metric-border: rgba(70, 92, 125, 0.12);
+        --button-bg-start: rgba(250, 252, 255, 0.96);
+        --button-bg-end: rgba(232, 238, 247, 0.98);
+        --button-border: rgba(70, 92, 125, 0.22);
+        --input-bg: rgba(255, 255, 255, 0.88);
+        --input-border: rgba(70, 92, 125, 0.18);
+        --math-bg-start: rgba(255, 255, 255, 0.94);
+        --math-bg-end: rgba(242, 246, 251, 0.98);
+        --text: #102033;
+        --muted: #54657f;
+        --accent: #0a7cc5;
+        --accent-2: #c46d1f;
+        --success: #137f45;
+        --danger: #b32929;
+        --link-bg: rgba(10, 124, 197, 0.08);
+        --link-border: rgba(10, 124, 197, 0.2);
+        --link-text: #0a7cc5;
+        --shadow: 0 28px 90px rgba(30, 41, 59, 0.16);
+      }
+
+      * { box-sizing: border-box; }
+
+      html, body { min-height: 100%; }
+
+      body {
+        margin: 0;
+        color: var(--text);
+        font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(136, 216, 255, 0.22), transparent 28%),
+          radial-gradient(circle at top right, rgba(245, 183, 107, 0.16), transparent 24%),
+          linear-gradient(135deg, var(--bg-start) 0%, var(--bg-mid) 50%, var(--bg-end) 100%);
+        overflow-x: hidden;
+      }
+
+      body::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(var(--body-grid) 1px, transparent 1px),
+          linear-gradient(90deg, var(--body-grid) 1px, transparent 1px);
+        background-size: 72px 72px;
+        mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.5), transparent 84%);
+      }
+
+      .shell {
+        position: relative;
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 32px 0 48px;
+      }
+
+      .hero,
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.8fr) minmax(280px, 0.9fr);
+        gap: 24px;
+        padding: 28px;
+        border-radius: 28px;
+        margin-bottom: 24px;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .hero::after {
+        content: '';
+        position: absolute;
+        inset: auto -10% -70% auto;
+        width: 320px;
+        height: 320px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(136, 216, 255, 0.28), transparent 70%);
+        filter: blur(10px);
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0.45rem 0.8rem;
+        border-radius: 999px;
+        background: rgba(136, 216, 255, 0.12);
+        color: var(--accent);
+        font-size: 0.78rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0.8rem 0 0;
+        font-family: 'Fraunces', 'Georgia', serif;
+        font-size: clamp(2.35rem, 5vw, 4.9rem);
+        line-height: 0.95;
+        letter-spacing: -0.05em;
+        max-width: 12ch;
+      }
+
+      .lede {
+        margin: 1rem 0 0;
+        max-width: 64ch;
+        color: var(--muted);
+        font-size: 1.03rem;
+        line-height: 1.65;
+      }
+
+      .hero-metrics {
+        display: grid;
+        gap: 14px;
+        align-content: start;
+      }
+
+      .metric {
+        padding: 18px;
+        border-radius: 20px;
+        background: var(--metric);
+        border: 1px solid var(--metric-border);
+      }
+
+      .metric-label {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--muted);
+        font-size: 0.78rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .metric-value {
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+        gap: 24px;
+      }
+
+      .panel {
+        border-radius: 24px;
+        padding: 22px;
+      }
+
+      .panel-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 18px;
+      }
+
+      .panel-title h2 {
+        margin: 0;
+        font-size: 1rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .panel-title .subtle {
+        color: var(--accent-2);
+        font-size: 0.84rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .button-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      button {
+        appearance: none;
+        border: 1px solid var(--button-border);
+        background: linear-gradient(180deg, var(--button-bg-start), var(--button-bg-end));
+        color: var(--text);
+        font: inherit;
+        font-weight: 600;
+        border-radius: 999px;
+        padding: 0.8rem 1rem;
+        cursor: pointer;
+        transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+        border-color: rgba(136, 216, 255, 0.45);
+        box-shadow: 0 12px 34px rgba(0, 0, 0, 0.24);
+      }
+
+      button:focus-visible,
+      textarea:focus-visible {
+        outline: 2px solid rgba(136, 216, 255, 0.8);
+        outline-offset: 2px;
+      }
+
+      .integral-frame,
+      .preview-frame {
+        min-height: 220px;
+        display: flex;
+        align-items: center;
+      }
+
+      .math-block {
+        width: 100%;
+        padding: 18px 18px 18px 20px;
+        border-radius: 20px;
+        background: linear-gradient(180deg, var(--math-bg-start), var(--math-bg-end));
+        border: 1px solid rgba(161, 189, 255, 0.14);
+        color: var(--text);
+        font-size: clamp(1.5rem, 2.2vw, 2.2rem);
+        line-height: 1.35;
+        min-height: 120px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        overflow-x: auto;
+      }
+
+      .math-block.is-empty {
+        color: var(--muted);
+        font-size: 1rem;
+      }
+
+      .answer-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 24px;
+        margin-top: 24px;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 10px;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 170px;
+        resize: vertical;
+        padding: 16px 18px;
+        border-radius: 20px;
+        border: 1px solid var(--input-border);
+        background: var(--input-bg);
+        color: var(--text);
+        font: 500 1rem/1.6 'IBM Plex Mono', 'SFMono-Regular', monospace;
+      }
+
+      textarea::placeholder {
+        color: rgba(157, 176, 204, 0.72);
+      }
+
+      .hint {
+        margin-top: 12px;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .footer-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-top: 24px;
+      }
+
+      .status {
+        min-height: 1.5rem;
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .status[data-tone="success"] { color: var(--success); }
+      .status[data-tone="error"] { color: var(--danger); }
+
+      .fine-print {
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .page-link,
+      .theme-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 0.8rem 1rem;
+        border-radius: 999px;
+        border: 1px solid var(--link-border);
+        background: var(--link-bg);
+        color: var(--link-text);
+        text-decoration: none;
+        font-weight: 700;
+      }
+
+      .theme-toggle {
+        cursor: pointer;
+      }
+
+      .theme-toggle:hover,
+      .page-link:hover {
+        transform: translateY(-1px);
+      }
+
+      @media (max-width: 920px) {
+        .hero,
+        .grid,
+        .answer-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .hero {
+          padding: 22px;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .shell {
+          width: min(100% - 20px, 1180px);
+          padding: 20px 0 36px;
+        }
+
+        .hero-actions {
+          align-items: stretch;
+        }
+
+        .page-link,
+        .theme-toggle {
+          width: 100%;
+        }
+
+        .panel,
+        .hero {
+          border-radius: 20px;
+        }
+
+        button {
+          width: 100%;
+        }
+      }
     </style>
   </head>
   <body>
-    <h1>Rapid Fire Integrals</h1>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <div class="eyebrow">Rapid Fire Integrals</div>
+          <h1>Sharper symbolic practice, with richer TeX and a cleaner solve loop.</h1>
+          <p class="lede">
+            Pick a level, solve a fresh antiderivative, and use the live MathJax preview to
+            compare forms. The checker accepts equivalent answers with extra algebraic breathing
+            room.
+          </p>
+          <div class="hero-actions">
+            <a class="page-link" href="/solver">Open integration solver</a>
+            <button id="theme-toggle" class="theme-toggle" type="button">Toggle theme</button>
+          </div>
+        </div>
 
-    <div class="row">
-      <button data-level="easy" class="rapid">Easy</button>
-      <button data-level="medium" class="rapid">Medium</button>
-      <button data-level="hard" class="rapid">Hard</button>
-      <button data-level="newton" class="rapid">Newton</button>
-    </div>
+        <div class="hero-metrics">
+          <div class="metric">
+            <span class="metric-label">Mode</span>
+            <div id="mode" class="metric-value">Practice</div>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Difficulty</span>
+            <div id="difficulty" class="metric-value">Choose a level</div>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Checker</span>
+            <div class="metric-value">Derivative-based and lenient</div>
+          </div>
+        </div>
+      </section>
 
-    <div class="row">
-      <button data-level="easy" class="daily">Daily Easy</button>
-      <button data-level="medium" class="daily">Daily Medium</button>
-      <button data-level="hard" class="daily">Daily Hard</button>
-      <button data-level="newton" class="daily">Daily Newton</button>
-    </div>
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-title">
+            <h2>Practice sets</h2>
+            <div class="subtle">Fresh problems on demand</div>
+          </div>
+          <div class="button-row" aria-label="Practice difficulty controls">
+            <button data-level="easy" class="rapid">Easy</button>
+            <button data-level="medium" class="rapid">Medium</button>
+            <button data-level="hard" class="rapid">Hard</button>
+            <button data-level="newton" class="rapid">Newton</button>
+          </div>
+          <div style="height: 16px"></div>
+          <div class="button-row" aria-label="Daily difficulty controls">
+            <button data-level="easy" class="daily">Daily Easy</button>
+            <button data-level="medium" class="daily">Daily Medium</button>
+            <button data-level="hard" class="daily">Daily Hard</button>
+            <button data-level="newton" class="daily">Daily Newton</button>
+          </div>
+        </article>
 
-    <div id="integral">Select a difficulty to start.</div>
+        <article class="panel integral-panel">
+          <div class="panel-title">
+            <h2>Current integral</h2>
+            <div class="subtle">Rendered with MathJax</div>
+          </div>
+          <div class="integral-frame">
+            <div id="integral" class="math-block is-empty">Select a difficulty to start.</div>
+          </div>
+        </article>
+      </section>
 
-    <label for="answer">Your answer (LaTeX/plain expression):</label>
-    <textarea id="answer" placeholder="e.g. x^2*sin(x)-2*sin(x)+2*x*cos(x)"></textarea>
-    <div class="hint">Live MathJax preview:</div>
-    <div id="preview">\(\)</div>
+      <section class="answer-grid">
+        <article class="panel">
+          <div class="panel-title">
+            <h2>Answer</h2>
+            <div class="subtle">LaTeX or plain expression</div>
+          </div>
+          <label for="answer">Enter any antiderivative form you want to test.</label>
+          <textarea id="answer" placeholder="e.g. x^2*sin(x)-2*sin(x)+2*x*cos(x)"></textarea>
+          <div class="hint">Fractions, trig functions, and nested algebra render live below.</div>
+        </article>
 
-    <div class="row">
-      <button id="submit">Submit Answer</button>
-      <button id="giveup">Give Up</button>
-    </div>
+        <article class="panel">
+          <div class="panel-title">
+            <h2>Live preview</h2>
+            <div class="subtle">MathJax response</div>
+          </div>
+          <div class="preview-frame">
+            <div id="preview" class="math-block is-empty">Type an antiderivative to preview it here.</div>
+          </div>
+          <div class="hint">The preview is display-style, so fractions and powers read more naturally.</div>
+        </article>
+      </section>
 
-    <div id="status"></div>
+      <div class="footer-row">
+        <div class="button-row">
+          <button id="submit">Submit Answer</button>
+          <button id="giveup">Give Up</button>
+          <button id="reset">Clear Answer</button>
+        </div>
+        <div id="status" class="status"></div>
+      </div>
+
+      <p class="fine-print">Tip: equivalent antiderivatives are accepted, including versions with an added constant.</p>
+    </main>
 
     <script>
       const socket = io();
@@ -55,19 +530,80 @@
       const answerNode = document.getElementById('answer');
       const statusNode = document.getElementById('status');
       const previewNode = document.getElementById('preview');
+      const modeNode = document.getElementById('mode');
+      const difficultyNode = document.getElementById('difficulty');
+      const themeToggleNode = document.getElementById('theme-toggle');
+      const themeStorageKey = 'rapidfireintegrals-theme';
+
+      function getPreferredTheme() {
+        const savedTheme = window.localStorage.getItem(themeStorageKey);
+        if (savedTheme === 'light' || savedTheme === 'dark') {
+          return savedTheme;
+        }
+
+        return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      }
+
+      function applyTheme(theme) {
+        document.documentElement.dataset.theme = theme;
+        window.localStorage.setItem(themeStorageKey, theme);
+        themeToggleNode.textContent = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
+        themeToggleNode.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+      }
+
+      applyTheme(getPreferredTheme());
+      themeToggleNode.addEventListener('click', () => {
+        applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+      });
+
+      function prettifyLevel(level) {
+        return level
+          .replace(/^daily-/, 'Daily ')
+          .replace(/\b\w/g, (character) => character.toUpperCase());
+      }
+
+      function setStatus(message = '', tone = 'neutral') {
+        statusNode.textContent = message;
+        statusNode.dataset.tone = tone;
+      }
+
+      function typesetNode(node) {
+        if (window.MathJax?.typesetPromise) {
+          window.MathJax.typesetPromise([node]).catch(() => {});
+        }
+      }
+
+      function setMath(node, latex) {
+        node.classList.remove('is-empty');
+        node.textContent = `\\[${latex}\\]`;
+        typesetNode(node);
+      }
 
       function renderMath() {
-        previewNode.textContent = `\\(${answerNode.value || ''}\\)`;
-        if (window.MathJax?.typesetPromise) {
-          window.MathJax.typesetPromise([previewNode]).catch(() => {});
+        const latex = answerNode.value.trim();
+        if (!latex) {
+          previewNode.classList.add('is-empty');
+          previewNode.textContent = 'Type an antiderivative to preview it here.';
+          return;
         }
+
+        setMath(previewNode, `\\displaystyle ${latex}`);
       }
 
       answerNode.addEventListener('input', renderMath);
 
+      document.getElementById('reset').addEventListener('click', () => {
+        answerNode.value = '';
+        renderMath();
+        setStatus('');
+        answerNode.focus();
+      });
+
       document.querySelectorAll('.rapid').forEach((button) => {
         button.addEventListener('click', () => {
-          statusNode.textContent = '';
+          modeNode.textContent = 'Practice';
+          difficultyNode.textContent = button.textContent;
+          setStatus('Fetching a fresh integral...');
           answerNode.value = '';
           renderMath();
           socket.emit('request_integral', { level: button.dataset.level });
@@ -76,7 +612,9 @@
 
       document.querySelectorAll('.daily').forEach((button) => {
         button.addEventListener('click', () => {
-          statusNode.textContent = '';
+          modeNode.textContent = 'Daily drill';
+          difficultyNode.textContent = button.textContent;
+          setStatus('Fetching today’s challenge...');
           answerNode.value = '';
           renderMath();
           socket.emit('request_daily', { level: button.dataset.level });
@@ -84,23 +622,33 @@
       });
 
       document.getElementById('submit').addEventListener('click', () => {
+        setStatus('Checking your answer...');
         socket.emit('submit_answer', { answer: answerNode.value });
       });
 
       document.getElementById('giveup').addEventListener('click', () => {
+        setStatus('Revealing the solution...');
         socket.emit('give_up');
       });
 
       socket.on('integral', (payload) => {
-        integralNode.textContent = `\\(${payload.integral}\\)`;
-        if (window.MathJax?.typesetPromise) {
-          window.MathJax.typesetPromise([integralNode]).catch(() => {});
+        if (payload.level?.startsWith('daily-')) {
+          modeNode.textContent = 'Daily drill';
+          difficultyNode.textContent = prettifyLevel(payload.level);
+        } else {
+          modeNode.textContent = 'Practice';
+          difficultyNode.textContent = prettifyLevel(payload.level);
         }
+
+        setMath(integralNode, payload.integral);
+        setStatus('Ready.');
       });
 
       socket.on('result', (payload) => {
-        statusNode.textContent = payload.message;
+        setStatus(payload.message, payload.correct ? 'success' : 'error');
       });
+
+      renderMath();
     </script>
   </body>
 </html>

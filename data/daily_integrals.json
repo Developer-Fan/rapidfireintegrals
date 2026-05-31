@@ -1,9 +1,16 @@
 {
   "easy": {
     "2026-05-31": {
-      "expression": "(6*x)/(1+x^2)",
-      "integral": "\\int \\\\frac{6x}{1+x^2}\\,dx",
-      "solution": "x^2/2"
+      "expression": "6*x/(2+x^2)",
+      "integral": "\\displaystyle \\int \\frac{6x}{2+x^2}\\,dx",
+      "solution": "3 log(x^2 + 2)"
+    }
+  },
+  "medium": {
+    "2026-05-31": {
+      "expression": "2/(1+x^2)",
+      "integral": "\\displaystyle \\int \\frac{2}{1+x^2}\\,dx",
+      "solution": "2*atan(x)"
     }
   }
 }
