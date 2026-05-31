@@ -21,7 +21,7 @@ if SOCKETIO_ASYNC_MODE == "eventlet":
         SOCKETIO_ASYNC_MODE = "threading"
 
 import sympy as sp
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, session
 from flask_socketio import SocketIO, emit
 from sympy.parsing.sympy_parser import (
     convert_xor,
@@ -36,8 +36,17 @@ app.config["SECRET_KEY"] = os.environ.get("RAPIDFIRE_SECRET_KEY", "dev-secret-ch
 socketio = SocketIO(app, async_mode=SOCKETIO_ASYNC_MODE, cors_allowed_origins="*")
 
 DATA_FILE = Path(__file__).parent / "data" / "daily_integrals.json"
+WORD_PROBLEM_FILE = Path(__file__).parent / "data" / "word_problems.json"
+INTEGRAL_TEMPLATE_FILE = Path(__file__).parent / "data" / "integral_templates.json"
 SUPPORTED_LEVELS = {"easy", "medium", "hard", "newton"}
 SESSION_TTL_SECONDS = 3600
+MAX_EXPRESSION_LENGTH = int(os.environ.get("RAPIDFIRE_MAX_EXPRESSION_LENGTH", "280"))
+MAX_SYMBOLIC_OPS = int(os.environ.get("RAPIDFIRE_MAX_SYMBOLIC_OPS", "280"))
+PARSE_BUDGET_SECONDS = float(os.environ.get("RAPIDFIRE_PARSE_BUDGET_SECONDS", "0.10"))
+SIMPLIFY_BUDGET_SECONDS = float(os.environ.get("RAPIDFIRE_SIMPLIFY_BUDGET_SECONDS", "0.20"))
+INTEGRATE_BUDGET_SECONDS = float(os.environ.get("RAPIDFIRE_INTEGRATE_BUDGET_SECONDS", "0.45"))
+RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get("RAPIDFIRE_RATE_LIMIT_WINDOW_SECONDS", "60"))
+RATE_LIMIT_MAX_EVENTS_PER_WINDOW = int(os.environ.get("RAPIDFIRE_RATE_LIMIT_MAX_EVENTS", "45"))
 SYMPY_TRANSFORMATIONS = standard_transformations + (
     implicit_multiplication_application,
     convert_xor,
@@ -54,6 +63,7 @@ SYMPY_LOCAL_DICT = {
     "cot": sp.cot,
     "ln": sp.log,
     "log": sp.log,
+    "log10": lambda value: sp.log(value, 10),
     "exp": sp.exp,
     "sinh": sp.sinh,
     "cosh": sp.cosh,
@@ -68,12 +78,69 @@ SYMPY_LOCAL_DICT = {
     "arcsin": sp.asin,
     "arccos": sp.acos,
     "arctan": sp.atan,
+    "asin": sp.asin,
+    "acos": sp.acos,
+    "atan": sp.atan,
     "Abs": sp.Abs,
+    "Piecewise": sp.Piecewise,
     "root": sp.root,
 }
 
 session_state: dict[str, dict[str, str]] = {}
+rate_limit_state: dict[str, list[float]] = {}
 state_lock = threading.Lock()
+word_problem_bank_cache: dict | None = None
+integral_template_cache: dict[str, list[dict[str, str]]] | None = None
+
+
+def _within_budget(started_at: float, budget_seconds: float) -> bool:
+    return (time.perf_counter() - started_at) <= budget_seconds
+
+
+def _is_rate_limited(key: str) -> bool:
+    now = time.time()
+    cutoff = now - RATE_LIMIT_WINDOW_SECONDS
+    with state_lock:
+        events = rate_limit_state.setdefault(key, [])
+        events[:] = [stamp for stamp in events if stamp >= cutoff]
+        if len(events) >= RATE_LIMIT_MAX_EVENTS_PER_WINDOW:
+            return True
+        events.append(now)
+        return False
+
+
+def _socket_rate_limited() -> bool:
+    sid_key = f"sid:{request.sid}"
+    ip_key = f"ip:{request.remote_addr or 'unknown'}"
+    return _is_rate_limited(sid_key) or _is_rate_limited(ip_key)
+
+
+def _normalize_abs_bars(expression: str) -> str:
+    normalized = expression
+    for _ in range(6):
+        updated = re.sub(r"\|([^|]+)\|", r"Abs(\1)", normalized)
+        if updated == normalized:
+            break
+        normalized = updated
+    return normalized
+
+
+def _normalize_inverse_aliases(expression: str) -> str:
+    normalized = expression
+    alias_map = {
+        "sin": "arcsin",
+        "cos": "arccos",
+        "tan": "arctan",
+        "sinh": "asinh",
+        "cosh": "acosh",
+        "tanh": "atanh",
+    }
+    for base, inverse in alias_map.items():
+        normalized = re.sub(rf"\b{base}\s*\^\s*-\s*1\s*\(([^()]+)\)", rf"{inverse}(\1)", normalized)
+        normalized = re.sub(rf"\b{base}\s*\^\s*-\s*1\s*\{{([^{{}}]+)\}}", rf"{inverse}(\1)", normalized)
+        normalized = re.sub(rf"\b{base}\s*\^\s*\{{\s*-\s*1\s*\}}\s*\(([^()]+)\)", rf"{inverse}(\1)", normalized)
+        normalized = re.sub(rf"\b{base}\s*\^\s*\{{\s*-\s*1\s*\}}\s*\{{([^{{}}]+)\}}", rf"{inverse}(\1)", normalized)
+    return normalized
 
 
 def _clean_expression(expression: str) -> str:
@@ -103,10 +170,35 @@ def _clean_expression(expression: str) -> str:
 
 def _prepare_for_sympy(expression: str) -> str:
     cleaned = _clean_expression(expression)
+    cleaned = _normalize_abs_bars(cleaned)
+    cleaned = _normalize_inverse_aliases(cleaned)
+
+    cleaned = re.sub(r"\blog10\s*\(([^()]+)\)", r"log(\1, 10)", cleaned)
+    cleaned = re.sub(r"\blog10\s*\{([^{}]+)\}", r"log(\1, 10)", cleaned)
+    cleaned = re.sub(r"\blog_\{([^{}]+)\}\s*\(([^()]+)\)", r"log(\2, \1)", cleaned)
+    cleaned = re.sub(r"\blog_\{([^{}]+)\}\s*\{([^{}]+)\}", r"log(\2, \1)", cleaned)
+    cleaned = re.sub(r"\blog_([A-Za-z0-9.]+)\s*\(([^()]+)\)", r"log(\2, \1)", cleaned)
+    cleaned = re.sub(r"\blog_([A-Za-z0-9.]+)\s*\{([^{}]+)\}", r"log(\2, \1)", cleaned)
+
     function_pattern = (
         r"arcsin|arccos|arctan|asinh|acosh|atanh|"
         r"sinh|cosh|tanh|sech|csch|coth|"
         r"sin|cos|tan|sec|csc|cot|ln|log|exp|sqrt"
+    )
+    cleaned = re.sub(
+        rf"\b({function_pattern})\s*\^\s*([-+]?\d+)\s*\(([^()]+)\)",
+        r"(\1(\3))**(\2)",
+        cleaned,
+    )
+    cleaned = re.sub(
+        rf"\b({function_pattern})\s*\^\s*([-+]?\d+)\s*\{{([^{{}}]+)\}}",
+        r"(\1(\3))**(\2)",
+        cleaned,
+    )
+    cleaned = re.sub(
+        rf"\b({function_pattern})\s*\^\s*\{{([^{{}}]+)\}}\s*\(([^()]+)\)",
+        r"(\1(\3))**(\2)",
+        cleaned,
     )
     cleaned = re.sub(
         rf"\b({function_pattern})\s*\^\s*\{{([^{{}}]+)\}}\s*\{{([^{{}}]+)\}}",
@@ -131,12 +223,18 @@ def _prepare_for_sympy(expression: str) -> str:
 
 
 def _parse_expression(expression: str) -> sp.Expr | None:
+    if len(expression.strip()) > MAX_EXPRESSION_LENGTH:
+        return None
+
     prepared = _prepare_for_sympy(expression)
     if not prepared:
         return None
+    if len(prepared) > MAX_EXPRESSION_LENGTH:
+        return None
 
+    started_at = time.perf_counter()
     try:
-        return parse_expr(
+        parsed = parse_expr(
             prepared,
             local_dict=SYMPY_LOCAL_DICT,
             transformations=SYMPY_TRANSFORMATIONS,
@@ -145,6 +243,17 @@ def _parse_expression(expression: str) -> sp.Expr | None:
     except (SyntaxError, ValueError, TypeError):
         return None
 
+    if not _within_budget(started_at, PARSE_BUDGET_SECONDS):
+        return None
+
+    try:
+        if sp.count_ops(parsed, visual=False) > MAX_SYMBOLIC_OPS:
+            return None
+    except Exception:
+        return None
+
+    return parsed
+
 
 def _expressions_equivalent(left: str, right: str) -> bool:
     left_expr = _parse_expression(left)
@@ -152,10 +261,12 @@ def _expressions_equivalent(left: str, right: str) -> bool:
     if left_expr is None or right_expr is None:
         return False
 
+    simplify_start = time.perf_counter()
     try:
-        return sp.simplify(left_expr - right_expr) == 0
+        result = sp.simplify(left_expr - right_expr) == 0
     except Exception:
         return False
+    return bool(result and _within_budget(simplify_start, SIMPLIFY_BUDGET_SECONDS))
 
 
 def _integrate_expression(expression: str, variable_name: str = "x") -> str:
@@ -167,18 +278,28 @@ def _integrate_expression(expression: str, variable_name: str = "x") -> str:
         return "Unavailable"
 
     variable = sp.Symbol(variable_name)
+    integrate_start = time.perf_counter()
     try:
         solution = sp.integrate(parsed, variable)
     except Exception:
         return "Unavailable"
 
+    if not _within_budget(integrate_start, INTEGRATE_BUDGET_SECONDS):
+        return "Unavailable"
+
     if getattr(solution, "has", None) and solution.has(sp.Integral):
         return "Unavailable"
 
+    simplify_start = time.perf_counter()
     try:
-        return sp.sstr(sp.simplify(solution))
+        simplified_solution = sp.simplify(solution)
     except Exception:
         return sp.sstr(solution)
+
+    if not _within_budget(simplify_start, SIMPLIFY_BUDGET_SECONDS):
+        return "Unavailable"
+
+    return sp.sstr(simplified_solution)
 
 
 def _expression_to_latex(expression: str) -> str:
@@ -214,15 +335,21 @@ def check_answer_with_newton(user_answer: str, expected_integrand: str) -> bool:
         return False
 
     x = sp.Symbol("x")
+    diff_start = time.perf_counter()
     try:
         derived = sp.diff(answer_expr, x)
     except Exception:
         return False
 
+    if not _within_budget(diff_start, SIMPLIFY_BUDGET_SECONDS):
+        return False
+
+    simplify_start = time.perf_counter()
     try:
-        return sp.simplify(derived - expected_expr) == 0
+        equivalent = sp.simplify(derived - expected_expr) == 0
     except Exception:
         return False
+    return bool(equivalent and _within_budget(simplify_start, SIMPLIFY_BUDGET_SECONDS))
 
 
 def _render_integral_mathjax(integrand_latex: str) -> str:
@@ -233,232 +360,240 @@ def _latex_fraction(numerator: str, denominator: str) -> str:
     return rf"\frac{{{numerator}}}{{{denominator}}}"
 
 
+def _load_integral_templates() -> dict[str, list[dict[str, str]]]:
+    global integral_template_cache
+    if integral_template_cache is not None:
+        return integral_template_cache
+
+    if not INTEGRAL_TEMPLATE_FILE.exists():
+        integral_template_cache = {}
+        return integral_template_cache
+
+    try:
+        parsed = json.loads(INTEGRAL_TEMPLATE_FILE.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        integral_template_cache = {}
+        return integral_template_cache
+
+    templates: dict[str, list[dict[str, str]]] = {}
+    for level, entries in parsed.items():
+        if not isinstance(entries, list):
+            continue
+        cleaned_entries = [entry for entry in entries if isinstance(entry, dict)]
+        templates[str(level)] = cleaned_entries
+
+    integral_template_cache = templates
+    return integral_template_cache
+
+
+def _render_integral_pool(level: str, values: dict[str, int]) -> list[dict[str, str]]:
+    templates = _load_integral_templates().get(level, [])
+    rendered: list[dict[str, str]] = []
+    for entry in templates:
+        expression_template = str(entry.get("expression", "x"))
+        integral_template = str(entry.get("integral_latex", "x"))
+        try:
+            expression = expression_template.format(**values)
+            integral_latex = integral_template.format(**values)
+        except (KeyError, ValueError):
+            continue
+        rendered.append(
+            {
+                "expression": expression,
+                "integral": _render_integral_mathjax(integral_latex),
+            }
+        )
+
+    if rendered:
+        return rendered
+
+    # Fallback keeps the app running if the template file is missing or malformed.
+    return [{"expression": "x", "integral": _render_integral_mathjax("x")}]
+
+
 def _easy_pool(rng: random.Random) -> list[dict[str, str]]:
-    a = rng.randint(1, 6)
-    b = rng.randint(2, 6)
-    c = rng.randint(1, 5)
-    n = rng.randint(2, 5)
-    return [
-        {
-            "expression": f"{a}*x^{n}",
-            "integral": _render_integral_mathjax(f"{a}x^{{{n}}}"),
-        },
-        {
-            "expression": f"{a}*e^({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}e^{{{b}x}}"),
-        },
-        {
-            "expression": f"{a}*sin({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}\\sin({b}x)"),
-        },
-        {
-            "expression": f"{a}*cos({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}\\cos({b}x)"),
-        },
-        {
-            "expression": f"{a}*x/({b}+x^2)",
-            "integral": _render_integral_mathjax(_latex_fraction(f"{a}x", f"{b}+x^2")),
-        },
-        {
-            "expression": f"{a}/({b}+x)",
-            "integral": _render_integral_mathjax(_latex_fraction(str(a), f"{b}+x")),
-        },
-        {
-            "expression": f"{a}/sqrt(x)",
-            "integral": _render_integral_mathjax(_latex_fraction(str(a), "\\sqrt{x}")),
-        },
-        {
-            "expression": f"{a}*sec({c}*x)^2",
-            "integral": _render_integral_mathjax(f"{a}\\sec^2({c}x)"),
-        },
-        {
-            "expression": f"{a}*csc({c}*x)^2",
-            "integral": _render_integral_mathjax(f"{a}\\csc^2({c}x)"),
-        },
-        {
-            "expression": f"{a}*(x+{c})^{n}",
-            "integral": _render_integral_mathjax(f"{a}(x+{c})^{{{n}}}"),
-        },
-        {
-            "expression": f"{a}*sqrt(x+{c})",
-            "integral": _render_integral_mathjax(f"{a}\\sqrt{{x+{c}}}"),
-        },
-    ]
+    values = {
+        "a": rng.randint(1, 6),
+        "b": rng.randint(2, 6),
+        "c": rng.randint(1, 5),
+        "d": rng.randint(1, 4),
+        "n": rng.randint(2, 5),
+    }
+    return _render_integral_pool("easy", values)
 
 
 def _medium_pool(rng: random.Random) -> list[dict[str, str]]:
-    a = rng.randint(1, 4)
-    b = rng.randint(1, 5)
-    c = rng.randint(2, 5)
-    d = rng.randint(1, 4)
-    return [
-        {
-            "expression": f"{a}*x*sin({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}x\\sin({b}x)"),
-        },
-        {
-            "expression": f"{a}*x*cos({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}x\\cos({b}x)"),
-        },
-        {
-            "expression": f"{a}*x*e^({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}xe^{{{b}x}}"),
-        },
-        {
-            "expression": f"{a}/(1+x^2)",
-            "integral": _render_integral_mathjax(_latex_fraction(str(a), "1+x^2")),
-        },
-        {
-            "expression": f"{a}/sqrt(1-x^2)",
-            "integral": _render_integral_mathjax(f"{a}\\arcsin(x)"),
-        },
-        {
-            "expression": f"{a}*x/sqrt({c}+x^2)",
-            "integral": _render_integral_mathjax(_latex_fraction(f"{a}x", f"\\sqrt{{{c}+x^2}}")),
-        },
-        {
-            "expression": f"{a}*sec({b}*x)*tan({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}\\sec({b}x)\\tan({b}x)"),
-        },
-        {
-            "expression": f"{a}*csc({b}*x)*cot({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}\\csc({b}x)\\cot({b}x)"),
-        },
-        {
-            "expression": f"{a}*x/(1+x^{d})",
-            "integral": _render_integral_mathjax(_latex_fraction(f"{a}x", f"1+x^{d}")),
-        },
-        {
-            "expression": f"{a}*exp({b}*x)/(1+exp({b}*x))",
-            "integral": _render_integral_mathjax(_latex_fraction(f"{a}e^{{{b}x}}", f"1+e^{{{b}x}}")),
-        },
-        {
-            "expression": f"{a}*sinh({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}\\sinh({b}x)"),
-        },
-        {
-            "expression": f"{a}*cosh({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}\\cosh({b}x)"),
-        },
-    ]
+    values = {
+        "a": rng.randint(1, 4),
+        "b": rng.randint(1, 5),
+        "c": rng.randint(2, 5),
+        "d": rng.randint(1, 4),
+        "n": rng.randint(2, 5),
+    }
+    return _render_integral_pool("medium", values)
 
 
 def _hard_pool(rng: random.Random) -> list[dict[str, str]]:
-    a = rng.randint(1, 3)
-    b = rng.randint(1, 4)
-    c = rng.randint(1, 4)
-    d = rng.randint(2, 5)
-    return [
-        {
-            "expression": f"{a}*x^2*e^({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}x^2e^{{{b}x}}"),
-        },
-        {
-            "expression": f"{a}*x^2*sin({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}x^2\\sin({b}x)"),
-        },
-        {
-            "expression": f"{a}*x^2*cos({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}x^2\\cos({b}x)"),
-        },
-        {
-            "expression": f"{a}*ln(x)",
-            "integral": _render_integral_mathjax(f"{a}\\ln(x)"),
-        },
-        {
-            "expression": f"{a}*x*ln(x)",
-            "integral": _render_integral_mathjax(f"{a}x\\ln(x)"),
-        },
-        {
-            "expression": f"{a}*e^({b}*x)*sin({c}*x)",
-            "integral": _render_integral_mathjax(f"{a}e^{{{b}x}}\\sin({c}x)"),
-        },
-        {
-            "expression": f"{a}*e^({b}*x)*cos({c}*x)",
-            "integral": _render_integral_mathjax(f"{a}e^{{{b}x}}\\cos({c}x)"),
-        },
-        {
-            "expression": f"{a}*x^3*sin({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}x^3\\sin({b}x)"),
-        },
-        {
-            "expression": f"{a}*x^3*cos({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}x^3\\cos({b}x)"),
-        },
-        {
-            "expression": f"{a}*x^2/(1+x^{d})",
-            "integral": _render_integral_mathjax(_latex_fraction(f"{a}x^2", f"1+x^{d}")),
-        },
-        {
-            "expression": f"{a}*sech({b}*x)^2",
-            "integral": _render_integral_mathjax(f"{a}\\operatorname{{sech}}^2({b}x)"),
-        },
-        {
-            "expression": f"{a}*csch({b}*x)^2",
-            "integral": _render_integral_mathjax(f"{a}\\operatorname{{csch}}^2({b}x)"),
-        },
-        {
-            "expression": f"{a}*tanh({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}\\tanh({b}x)"),
-        },
-    ]
+    values = {
+        "a": rng.randint(1, 3),
+        "b": rng.randint(1, 4),
+        "c": rng.randint(1, 4),
+        "d": rng.randint(2, 5),
+        "n": rng.randint(2, 5),
+    }
+    return _render_integral_pool("hard", values)
 
 
 def _newton_pool(rng: random.Random) -> list[dict[str, str]]:
-    a = rng.randint(1, 4)
-    b = rng.randint(1, 4)
-    c = rng.randint(2, 5)
-    d = rng.randint(2, 5)
-    return [
-        {
-            "expression": f"{a}/x",
-            "integral": _render_integral_mathjax(f"{a}/x"),
-        },
-        {
-            "expression": f"{a}/(x*ln(x))",
-            "integral": _render_integral_mathjax(f"{a}/(x\\ln(x))"),
-        },
-        {
-            "expression": f"{a}*x/(1+x^2)",
-            "integral": _render_integral_mathjax(_latex_fraction(f"{a}x", "1+x^2")),
-        },
-        {
-            "expression": f"{a}*x/sqrt({b}^2-x^2)",
-            "integral": _render_integral_mathjax(_latex_fraction(f"{a}x", f"\\sqrt{{{b}^2-x^2}}")),
-        },
-        {
-            "expression": f"{a}/(1+({b}*x)^2)",
-            "integral": _render_integral_mathjax(f"{a}/(1+({b}x)^2)"),
-        },
-        {
-            "expression": f"{a}*e^({b}*x)*cos({c}*x)",
-            "integral": _render_integral_mathjax(f"{a}e^{{{b}x}}\\cos({c}x)"),
-        },
-        {
-            "expression": f"{a}/(x^2+{d}^2)",
-            "integral": _render_integral_mathjax(_latex_fraction(str(a), f"x^2+{d}^2")),
-        },
-        {
-            "expression": f"{a}/sqrt(x^2+{d})",
-            "integral": _render_integral_mathjax(_latex_fraction(str(a), f"\\sqrt{{x^2+{d}}}")),
-        },
-        {
-            "expression": f"{a}*sech({b}*x)*tanh({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}\\operatorname{{sech}}({b}x)\\tanh({b}x)"),
-        },
-        {
-            "expression": f"{a}*csch({b}*x)*coth({b}*x)",
-            "integral": _render_integral_mathjax(f"{a}\\operatorname{{csch}}({b}x)\\coth({b}x)"),
-        },
-        {
-            "expression": f"{a}*exp({b}*x)/(1+exp({b}*x)^2)",
-            "integral": _render_integral_mathjax(_latex_fraction(f"{a}e^{{{b}x}}", f"1+e^{{2{b}x}}")),
-        },
-        {
-            "expression": f"{a}*(x^2+{d})^{-1}",
-            "integral": _render_integral_mathjax(_latex_fraction(str(a), f"x^2+{d}")),
-        },
-    ]
+    values = {
+        "a": rng.randint(1, 4),
+        "b": rng.randint(1, 4),
+        "c": rng.randint(2, 5),
+        "d": rng.randint(2, 5),
+        "n": rng.randint(2, 5),
+    }
+    return _render_integral_pool("newton", values)
+
+
+def _load_word_problem_bank() -> dict:
+    global word_problem_bank_cache
+    if word_problem_bank_cache is not None:
+        return word_problem_bank_cache
+
+    if not WORD_PROBLEM_FILE.exists():
+        word_problem_bank_cache = {"names": ["Bob", "Jane"], "categories": {}}
+        return word_problem_bank_cache
+
+    try:
+        word_problem_bank_cache = json.loads(WORD_PROBLEM_FILE.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        word_problem_bank_cache = {"names": ["Bob", "Jane"], "categories": {}}
+    return word_problem_bank_cache
+
+
+def _word_problem_values(rng: random.Random, bank: dict) -> dict[str, int | str]:
+    names = bank.get("names") or ["Bob", "Jane", "Kai", "Mina", "Ari", "Noah"]
+    return {
+        "name": rng.choice(names),
+        "a": rng.randint(2, 8),
+        "b": rng.randint(1, 6),
+        "c": rng.randint(1, 5),
+        "d": rng.randint(2, 7),
+        "m": rng.randint(1, 4),
+        "n": rng.randint(2, 5),
+        "p": rng.randint(1, 4),
+        "q": rng.randint(1, 5),
+        "r": rng.randint(2, 7),
+        "lower": rng.randint(0, 3),
+        "upper": rng.randint(4, 9),
+        "pi": "pi",
+    }
+
+
+def _format_word_problem_text(text: str, values: dict[str, int | str]) -> str:
+    return str(text).format(**values).strip()
+
+
+def _render_word_problem_entry(
+    category: str,
+    beginning: dict,
+    middle: dict,
+    end: dict,
+    values: dict[str, int | str],
+) -> dict[str, str]:
+    beginning_text = _format_word_problem_text(beginning.get("text", ""), values)
+    middle_text = _format_word_problem_text(middle.get("text", ""), values)
+    end_text = _format_word_problem_text(end.get("text", ""), values)
+    prompt = " ".join(part for part in [beginning_text, middle_text, end_text] if part)
+    integrand = _format_word_problem_text(middle.get("integrand", ""), values)
+    return {
+        "category": category,
+        "prompt": prompt,
+        "integrand": integrand,
+    }
+
+
+def _word_problem_categories() -> dict[str, dict]:
+    bank = _load_word_problem_bank()
+    categories = bank.get("categories", {})
+    if isinstance(categories, dict) and categories:
+        return {name: entry for name, entry in categories.items() if isinstance(entry, dict)}
+
+    entries = bank.get("entries", [])
+    if isinstance(entries, list) and entries:
+        grouped: dict[str, dict] = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            category = str(entry.get("category", "story"))
+            grouped.setdefault(category, {"beginnings": [], "middles": [], "ends": []})
+            grouped[category]["beginnings"].append({"text": entry.get("beginning", "")})
+            grouped[category]["middles"].append(
+                {"text": entry.get("middle", ""), "integrand": entry.get("integrand", "")}
+            )
+            grouped[category]["ends"].append({"text": entry.get("end", "")})
+        return grouped
+
+    return {}
+
+
+def generate_word_problem(rng: random.Random | None = None) -> dict[str, str]:
+    rng = rng or random.Random()
+    bank = _load_word_problem_bank()
+    categories = _word_problem_categories()
+    if not categories:
+        challenge = {
+            "category": "story",
+            "prompt": "A fallback problem is unavailable.",
+            "integrand": "x",
+        }
+    else:
+        category_name = rng.choice(sorted(categories.keys()))
+        category_bank = categories[category_name]
+        beginnings = category_bank.get("beginnings", [])
+        middles = category_bank.get("middles", [])
+        ends = category_bank.get("ends", [])
+        if not beginnings or not middles or not ends:
+            challenge = {
+                "category": category_name,
+                "prompt": "A fallback problem is unavailable.",
+                "integrand": "x",
+            }
+        else:
+            challenge = _render_word_problem_entry(
+                category_name,
+                rng.choice(beginnings),
+                rng.choice(middles),
+                rng.choice(ends),
+                _word_problem_values(rng, bank),
+            )
+    challenge["solution"] = _integrate_expression(challenge["integrand"], "x")
+    return challenge
+
+
+def _build_linear_combination_challenge(
+    pool: list[dict[str, str]],
+    rng: random.Random,
+    term_options: list[int] | None = None,
+) -> dict[str, str]:
+    if not pool:
+        return {
+            "expression": "x",
+            "integral": _render_integral_mathjax("x"),
+        }
+
+    options = [count for count in (term_options or [1, 2, 2, 3]) if count >= 1]
+    term_count = min(rng.choice(options), len(pool))
+    terms = rng.sample(pool, k=term_count)
+
+    if term_count == 1:
+        return dict(terms[0])
+
+    expression = " + ".join(f"({term['expression']})" for term in terms)
+    return {
+        "expression": expression,
+        "integral": _render_integral_mathjax(_expression_to_latex(expression)),
+    }
 
 
 def generate_integral(level: str, rng: random.Random | None = None) -> dict[str, str]:
@@ -470,12 +605,26 @@ def generate_integral(level: str, rng: random.Random | None = None) -> dict[str,
         "hard": _hard_pool,
         "newton": _newton_pool,
     }
+    term_options_by_level = {
+        "easy": [1, 2, 2, 3],
+        "medium": [1, 2, 2, 3],
+        "hard": [2, 2, 3],
+        "newton": [2, 2, 3],
+    }
     if level not in pools:
         level = "easy"
-    challenge = rng.choice(pools[level](rng))
-    solution = _integrate_expression(challenge["expression"], "x")
-    challenge["solution"] = solution
-    return challenge
+
+    pool = pools[level](rng)
+    for _ in range(7):
+        challenge = _build_linear_combination_challenge(pool, rng, term_options_by_level[level])
+        solution = _integrate_expression(challenge["expression"], "x")
+        if solution != "Unavailable":
+            challenge["solution"] = solution
+            return challenge
+
+    fallback = dict(rng.choice(pool))
+    fallback["solution"] = _integrate_expression(fallback["expression"], "x")
+    return fallback
 
 
 def _load_daily_data() -> dict:
@@ -527,8 +676,73 @@ def solver():
     return render_template("solver.html")
 
 
+@app.route("/worded")
+def worded():
+    return render_template("worded.html")
+
+
+@app.route("/documentation")
+def documentation():
+    return render_template("documentation.html")
+
+@app.route("/privacy")
+def privacy():
+    return render_template("privacy.html")
+
+@app.post("/api/word-problem")
+def word_problem_api():
+    if _is_rate_limited(f"word-problem:{request.remote_addr or 'unknown'}"):
+        return jsonify({"error": "Rate limit exceeded. Please slow down."}), 429
+
+    challenge = generate_word_problem()
+    session["word_problem_integrand"] = challenge["integrand"]
+    session["word_problem_solution"] = challenge["solution"]
+
+    return jsonify(
+        {
+            "prompt": challenge["prompt"],
+            "category": challenge["category"],
+            "target_latex": _expression_to_latex(challenge["integrand"]),
+            "experimental": True,
+        }
+    )
+
+
+@app.post("/api/word-problem/check")
+def word_problem_check_api():
+    if _is_rate_limited(f"word-problem-check:{request.remote_addr or 'unknown'}"):
+        return jsonify({"correct": False, "message": "Rate limit exceeded. Please slow down."}), 429
+
+    payload = request.get_json(silent=True) or request.form or {}
+    answer = str(payload.get("answer", ""))
+    integrand = str(session.get("word_problem_integrand", ""))
+    if not integrand:
+        return jsonify({"correct": False, "message": "Request a worded problem first."}), 400
+
+    is_correct = check_answer_with_newton(answer, integrand)
+    if is_correct:
+        return jsonify({"correct": True, "message": "Correct. Nice modeling."})
+    return jsonify({"correct": False, "message": "Not quite. Revise and try again."})
+
+
+@app.post("/api/word-problem/reveal")
+def word_problem_reveal_api():
+    if _is_rate_limited(f"word-problem-reveal:{request.remote_addr or 'unknown'}"):
+        return jsonify({"error": "Rate limit exceeded. Please slow down."}), 429
+
+    integrand = str(session.get("word_problem_integrand", ""))
+    if not integrand:
+        return jsonify({"error": "Request a worded problem first."}), 400
+
+    solution = str(session.get("word_problem_solution") or _integrate_expression(integrand, "x"))
+    return jsonify({"solution": solution, "latex": _expression_to_latex(solution)})
+
+
 @app.post("/api/solve")
 def solve_api():
+    if _is_rate_limited(f"solve:{request.remote_addr or 'unknown'}"):
+        return jsonify({"solution": "Unavailable", "error": "Rate limit exceeded. Please slow down."}), 429
+
     payload = request.get_json(silent=True) or request.form or {}
     expression = str(payload.get("expression", ""))
     variable = str(payload.get("variable", "x")).strip() or "x"
@@ -546,6 +760,10 @@ def daily_integral_api(level: str):
 
 @socketio.on("request_integral")
 def handle_request_integral(payload: dict | None = None):
+    if _socket_rate_limited():
+        emit("result", {"correct": False, "message": "Rate limit exceeded. Please slow down."})
+        return
+
     payload = payload or {}
     level = payload.get("level", "easy")
     challenge = generate_integral(level)
@@ -559,6 +777,10 @@ def handle_request_integral(payload: dict | None = None):
 
 @socketio.on("request_daily")
 def handle_request_daily(payload: dict | None = None):
+    if _socket_rate_limited():
+        emit("result", {"correct": False, "message": "Rate limit exceeded. Please slow down."})
+        return
+
     payload = payload or {}
     level = payload.get("level", "easy")
     challenge = get_daily_integral(level)
@@ -572,6 +794,10 @@ def handle_request_daily(payload: dict | None = None):
 
 @socketio.on("submit_answer")
 def handle_submit_answer(payload: dict | None = None):
+    if _socket_rate_limited():
+        emit("result", {"correct": False, "message": "Rate limit exceeded. Please slow down."})
+        return
+
     payload = payload or {}
     answer = payload.get("answer", "")
     with state_lock:
@@ -603,6 +829,10 @@ def handle_submit_answer(payload: dict | None = None):
 
 @socketio.on("give_up")
 def handle_give_up():
+    if _socket_rate_limited():
+        emit("result", {"correct": False, "message": "Rate limit exceeded. Please slow down."})
+        return
+
     with state_lock:
         _prune_sessions_locked()
         challenge = session_state.get(request.sid)
@@ -625,6 +855,7 @@ def handle_give_up():
 def handle_disconnect():
     with state_lock:
         session_state.pop(request.sid, None)
+        rate_limit_state.pop(f"sid:{request.sid}", None)
 
 
 if __name__ == "__main__":

@@ -202,6 +202,65 @@
         font-weight: 600;
       }
 
+      .metric-value.mono {
+        font-family: 'IBM Plex Mono', 'SFMono-Regular', monospace;
+      }
+
+      .level-card {
+        display: grid;
+        gap: 8px;
+      }
+
+      .level-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+      }
+
+      .level-name {
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+
+      .level-sub {
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+
+      .xp-track {
+        width: 100%;
+        height: 9px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(136, 216, 255, 0.18);
+        border: 1px solid rgba(161, 189, 255, 0.2);
+      }
+
+      .xp-fill {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent-2) 56%, var(--accent)));
+        box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 42%, transparent);
+        transition: width 520ms cubic-bezier(0.16, 0.84, 0.24, 1);
+      }
+
+      .xp-fill.bump {
+        animation: xpPulse 420ms ease;
+      }
+
+      @keyframes xpPulse {
+        0% { filter: brightness(1); }
+        45% { filter: brightness(1.35); }
+        100% { filter: brightness(1); }
+      }
+
+      .xp-label {
+        color: var(--muted);
+        font-size: 0.82rem;
+        font-family: 'IBM Plex Mono', 'SFMono-Regular', monospace;
+      }
+
       .grid {
         display: grid;
         grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
@@ -286,9 +345,15 @@
         min-height: 120px;
         display: flex;
         align-items: center;
-        justify-content: center;
-        text-align: center;
+        justify-content: flex-start;
+        text-align: left;
+        direction: ltr;
         overflow-x: auto;
+        scrollbar-gutter: stable both-edges;
+      }
+
+      .math-block mjx-container[display="true"] {
+        margin: 0;
       }
 
       .math-block.is-empty {
@@ -560,6 +625,9 @@
           </p>
           <div class="hero-actions">
             <a class="page-link" href="/solver">Open integration solver</a>
+            <a class="page-link" href="/worded">Open worded problems (experimental)</a>
+            <a class="page-link" href="/documentation">API docs</a>
+            <a class="page-link" href="/privacy">Privacy Notice</a>
             <button id="theme-toggle" class="theme-toggle" type="button">Toggle theme</button>
           </div>
         </div>
@@ -574,8 +642,43 @@
             <div id="difficulty" class="metric-value">Choose a level</div>
           </div>
           <div class="metric">
-            <span class="metric-label">Checker</span>
-            <div class="metric-value">Derivative-based and lenient</div>
+            <span class="metric-label">Q level</span>
+            <div class="level-card">
+              <div class="level-top">
+                <div id="q-level-name" class="level-name">Rookie</div>
+                <div id="q-streak" class="level-sub mono">0 streak</div>
+              </div>
+              <div class="xp-track" aria-hidden="true">
+                <div id="q-xp-fill" class="xp-fill"></div>
+              </div>
+              <div id="q-xp-label" class="xp-label">0 / 4 XP</div>
+            </div>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Daily level</span>
+            <div class="level-card">
+              <div class="level-top">
+                <div id="daily-level-name" class="level-name">Day One</div>
+                <div id="daily-streak" class="level-sub mono">0 streak</div>
+              </div>
+              <div class="xp-track" aria-hidden="true">
+                <div id="daily-xp-fill" class="xp-fill"></div>
+              </div>
+              <div id="daily-xp-label" class="xp-label">0 / 3 XP</div>
+            </div>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Mastery XP</span>
+            <div class="level-card">
+              <div class="level-top">
+                <div id="mastery-level-name" class="level-name">Initiate</div>
+                <div id="mastery-total-xp" class="level-sub mono">0 total XP</div>
+              </div>
+              <div class="xp-track" aria-hidden="true">
+                <div id="mastery-xp-fill" class="xp-fill"></div>
+              </div>
+              <div id="mastery-xp-label" class="xp-label">0 / 5 XP</div>
+            </div>
           </div>
         </div>
       </section>
@@ -667,6 +770,18 @@
       const previewNode = document.getElementById('preview');
       const modeNode = document.getElementById('mode');
       const difficultyNode = document.getElementById('difficulty');
+      const qLevelNameNode = document.getElementById('q-level-name');
+      const qStreakNode = document.getElementById('q-streak');
+      const qXpFillNode = document.getElementById('q-xp-fill');
+      const qXpLabelNode = document.getElementById('q-xp-label');
+      const dailyLevelNameNode = document.getElementById('daily-level-name');
+      const dailyStreakNode = document.getElementById('daily-streak');
+      const dailyXpFillNode = document.getElementById('daily-xp-fill');
+      const dailyXpLabelNode = document.getElementById('daily-xp-label');
+      const masteryLevelNameNode = document.getElementById('mastery-level-name');
+      const masteryTotalXpNode = document.getElementById('mastery-total-xp');
+      const masteryXpFillNode = document.getElementById('mastery-xp-fill');
+      const masteryXpLabelNode = document.getElementById('mastery-xp-label');
       const themeToggleNode = document.getElementById('theme-toggle');
       const resultOverlayNode = document.getElementById('result-overlay');
       const resultModalNode = document.getElementById('result-modal');
@@ -677,8 +792,163 @@
       const resultSecondaryNode = document.getElementById('result-secondary');
       const confettiLayerNode = document.getElementById('confetti-layer');
       const themeStorageKey = 'rapidfireintegrals-theme';
+      const progressStorageKey = 'rapidfireintegrals-progress';
       let activeLevel = 'easy';
       let activeMode = 'practice';
+      let currentChallengeSolved = false;
+      let previousDerivedProgress = null;
+
+      const qLevelNames = ['Rookie', 'Steady', 'Sharp', 'Fluent', 'Surgical', 'Mythic'];
+      const dailyLevelNames = ['Day One', 'Consistent', 'Reliable', 'Disciplined', 'Relentless', 'Legendary'];
+      const masteryLevelNames = ['Initiate', 'Explorer', 'Adept', 'Scholar', 'Virtuoso', 'Grandmaster'];
+
+      function toLocalIsoDate(value) {
+        const year = value.getFullYear();
+        const month = String(value.getMonth() + 1).padStart(2, '0');
+        const day = String(value.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+
+      function getTodayIso() {
+        return toLocalIsoDate(new Date());
+      }
+
+      function getYesterdayIso() {
+        const value = new Date();
+        value.setDate(value.getDate() - 1);
+        return toLocalIsoDate(value);
+      }
+
+      function practiceXpForLevel(level) {
+        const xpByLevel = {
+          easy: 1,
+          medium: 2,
+          hard: 3,
+          newton: 4,
+        };
+        return xpByLevel[level] || 1;
+      }
+
+      function loadProgress() {
+        try {
+          const parsed = JSON.parse(window.localStorage.getItem(progressStorageKey) || '{}');
+          const legacyPoints = Number(parsed.points) || 0;
+          return {
+            qStreak: Number(parsed.qStreak) || 0,
+            dailyStreak: Number(parsed.dailyStreak) || 0,
+            totalXp: Number(parsed.totalXp) || legacyPoints,
+            lastDailySolvedDate: typeof parsed.lastDailySolvedDate === 'string' ? parsed.lastDailySolvedDate : '',
+          };
+        } catch {
+          return {
+            qStreak: 0,
+            dailyStreak: 0,
+            totalXp: 0,
+            lastDailySolvedDate: '',
+          };
+        }
+      }
+
+      let progress = loadProgress();
+
+      function persistProgress() {
+        progress.points = progress.totalXp;
+        window.localStorage.setItem(progressStorageKey, JSON.stringify(progress));
+      }
+
+      function xpForNextLevel(level) {
+        return 4 + Math.floor(level * 1.8);
+      }
+
+      function deriveLevelState(streak, names) {
+        let level = 1;
+        let remainder = Math.max(0, Number(streak) || 0);
+        let needed = xpForNextLevel(level);
+
+        while (remainder >= needed) {
+          remainder -= needed;
+          level += 1;
+          needed = xpForNextLevel(level);
+        }
+
+        const name = names[Math.min(level - 1, names.length - 1)];
+        const percent = Math.max(0, Math.min(100, (remainder / needed) * 100));
+
+        return {
+          level,
+          name,
+          currentXp: remainder,
+          neededXp: needed,
+          percent,
+        };
+      }
+
+      function updateXpFill(fillNode, value, shouldAnimate) {
+        if (!shouldAnimate) {
+          fillNode.style.transition = 'none';
+          fillNode.style.width = `${value}%`;
+          requestAnimationFrame(() => {
+            fillNode.style.transition = '';
+          });
+          return;
+        }
+
+        fillNode.style.width = `${value}%`;
+        fillNode.classList.remove('bump');
+        requestAnimationFrame(() => {
+          fillNode.classList.add('bump');
+        });
+      }
+
+      function renderProgress(animate = false) {
+        const qState = deriveLevelState(progress.qStreak, qLevelNames);
+        const dailyState = deriveLevelState(progress.dailyStreak, dailyLevelNames);
+        const masteryState = deriveLevelState(progress.totalXp, masteryLevelNames);
+
+        qLevelNameNode.textContent = `${qState.name} L${qState.level}`;
+        qStreakNode.textContent = `${progress.qStreak} streak`;
+        qXpLabelNode.textContent = `${qState.currentXp} / ${qState.neededXp} XP`;
+
+        dailyLevelNameNode.textContent = `${dailyState.name} L${dailyState.level}`;
+        dailyStreakNode.textContent = `${progress.dailyStreak} streak`;
+        dailyXpLabelNode.textContent = `${dailyState.currentXp} / ${dailyState.neededXp} XP`;
+
+        const canAnimate = animate && previousDerivedProgress !== null;
+        updateXpFill(qXpFillNode, qState.percent, canAnimate);
+        updateXpFill(dailyXpFillNode, dailyState.percent, canAnimate);
+        updateXpFill(masteryXpFillNode, masteryState.percent, canAnimate);
+
+        masteryLevelNameNode.textContent = `${masteryState.name} L${masteryState.level}`;
+        masteryTotalXpNode.textContent = `${progress.totalXp} total XP`;
+        masteryXpLabelNode.textContent = `${masteryState.currentXp} / ${masteryState.neededXp} XP`;
+        previousDerivedProgress = {
+          q: qState.percent,
+          daily: dailyState.percent,
+          mastery: masteryState.percent,
+        };
+      }
+
+      function recordPracticeCorrect(level) {
+        progress.qStreak += 1;
+        progress.totalXp += practiceXpForLevel(level);
+      }
+
+      function recordPracticeMiss() {
+        progress.qStreak = 0;
+      }
+
+      function recordDailyCorrect() {
+        const today = getTodayIso();
+        if (progress.lastDailySolvedDate === today) {
+          return;
+        }
+
+        progress.dailyStreak = progress.lastDailySolvedDate === getYesterdayIso()
+          ? progress.dailyStreak + 1
+          : 1;
+        progress.lastDailySolvedDate = today;
+        progress.totalXp += 25;
+      }
 
       function getPreferredTheme() {
         const savedTheme = window.localStorage.getItem(themeStorageKey);
@@ -697,6 +967,7 @@
       }
 
       applyTheme(getPreferredTheme());
+      renderProgress(false);
       themeToggleNode.addEventListener('click', () => {
         applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
       });
@@ -714,14 +985,17 @@
 
       function typesetNode(node) {
         if (window.MathJax?.typesetPromise) {
-          window.MathJax.typesetPromise([node]).catch(() => {});
+          return window.MathJax.typesetPromise([node]).catch(() => {});
         }
+        return Promise.resolve();
       }
 
       function setMath(node, latex) {
         node.classList.remove('is-empty');
         node.textContent = `\\[${latex}\\]`;
-        typesetNode(node);
+        typesetNode(node).finally(() => {
+          node.scrollLeft = 0;
+        });
       }
 
       function hideResultPopup() {
@@ -750,7 +1024,12 @@
         setStatus('Fetching another one...');
         answerNode.value = '';
         renderMath();
-        socket.emit('request_integral', { level: activeLevel });
+        currentChallengeSolved = false;
+        if (activeMode === 'daily') {
+          socket.emit('request_daily', { level: activeLevel });
+        } else {
+          socket.emit('request_integral', { level: activeLevel });
+        }
       }
 
       function showResultPopup(payload) {
@@ -828,6 +1107,7 @@
           setStatus('Fetching a fresh integral...');
           answerNode.value = '';
           renderMath();
+          currentChallengeSolved = false;
           hideResultPopup();
           socket.emit('request_integral', { level: button.dataset.level });
         });
@@ -842,6 +1122,7 @@
           setStatus('Fetching today’s challenge...');
           answerNode.value = '';
           renderMath();
+          currentChallengeSolved = false;
           hideResultPopup();
           socket.emit('request_daily', { level: button.dataset.level });
         });
@@ -864,6 +1145,7 @@
       });
 
       socket.on('integral', (payload) => {
+        currentChallengeSolved = false;
         if (payload.level?.startsWith('daily-')) {
           activeMode = 'daily';
           activeLevel = payload.level.replace(/^daily-/, '');
@@ -881,6 +1163,21 @@
       });
 
       socket.on('result', (payload) => {
+        if (payload.correct && !currentChallengeSolved) {
+          if (activeMode === 'daily') {
+            recordDailyCorrect();
+          } else {
+            recordPracticeCorrect(activeLevel);
+          }
+          currentChallengeSolved = true;
+          persistProgress();
+          renderProgress(true);
+        } else if (!payload.correct && !payload.is_solution && activeMode === 'practice') {
+          recordPracticeMiss();
+          persistProgress();
+          renderProgress(true);
+        }
+
         setStatus(payload.message, payload.correct ? 'success' : 'error');
         showResultPopup(payload);
       });

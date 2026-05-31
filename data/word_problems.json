@@ -1,0 +1,82 @@
+{
+  "names": ["Bob", "Jane", "Kai", "Mina", "Ari", "Noah", "Lena", "Diego", "Iris", "Owen"],
+  "categories": {
+    "story": {
+      "beginnings": [
+        {"text": "{name} tracks the speed of a conveyor belt."},
+        {"text": "{name} measures the temperature drift of a lab sample."},
+        {"text": "{name} is modeling a signal amplifier."}
+      ],
+      "middles": [
+        {"text": "Its rate is v(x) = {a}x + {b}.", "integrand": "{a}*x+{b}"},
+        {"text": "The rate is T'(x) = {a}*exp({b}x).", "integrand": "{a}*exp({b}*x)"},
+        {"text": "The growth rate is g(x) = {a}/(1+x^2).", "integrand": "{a}/(1+x^2)"},
+        {"text": "Its angular speed is omega(x) = {a}*cos({c}x).", "integrand": "{a}*cos({c}*x)"},
+        {"text": "The rate is {a}*arctan({b}x).", "integrand": "{a}*arctan({b}*x)"},
+        {"text": "Its drift follows {a}*ln(1+{b}x).", "integrand": "{a}*ln(1+{b}*x)"}
+      ],
+      "ends": [
+        {"text": "Find one position function s(x) whose derivative matches this rate."},
+        {"text": "Construct any antiderivative and call it the quantity's primitive."}
+      ]
+    },
+    "volume": {
+      "beginnings": [
+        {"text": "{name} is filling a tank."},
+        {"text": "{name} is extruding a cone-like shape."},
+        {"text": "{name} describes a shell-method setup."}
+      ],
+      "middles": [
+        {"text": "At position x, the circular cross-section has radius r(x) = {a}x + {b}.", "integrand": "pi*({a}*x+{b})^2"},
+        {"text": "The radius varies as r(x) = {a}x and the cross-section area is proportional to r(x)^2.", "integrand": "pi*({a}*x)^2"},
+        {"text": "The shell radius is x and the height is {a}x + {b}.", "integrand": "2*pi*x*({a}*x+{b})"},
+        {"text": "The inflow rate is {a}*sqrt(x+{b}).", "integrand": "{a}*sqrt(x+{b})"},
+        {"text": "The inflow rate is {a}*asinh({b}x).", "integrand": "{a}*asinh({b}*x)"},
+        {"text": "The shell height is {a}/sqrt(1+({b}x)^2).", "integrand": "{a}/sqrt(1+({b}*x)^2)"}
+      ],
+      "ends": [
+        {"text": "Find a volume accumulation function V(x)."},
+        {"text": "Find the accumulated volume function."},
+        {"text": "Write one antiderivative for the volume."}
+      ]
+    },
+    "area": {
+      "beginnings": [
+        {"text": "{name} compares two curves on the same interval."},
+        {"text": "{name} sketches a slanted roof profile."},
+        {"text": "{name} models a shaded band between functions."}
+      ],
+      "middles": [
+        {"text": "The top curve is y = {a}x + {b} and the bottom curve is y = {c}x + {d}.", "integrand": "({a}*x+{b})-({c}*x+{d})"},
+        {"text": "The upper boundary is {a}x^2 + {b}; the lower boundary is {c}x + {d}.", "integrand": "({a}*x^2+{b})-({c}*x+{d})"},
+        {"text": "The width of the band is {a}/(1+x^2).", "integrand": "{a}/(1+x^2)"},
+        {"text": "The difference is {a}*sin({b}x) + {c}.", "integrand": "{a}*sin({b}*x)+{c}"},
+        {"text": "The width is {a}*arcsin({b}x).", "integrand": "{a}*arcsin({b}*x)"},
+        {"text": "The band thickness is {a}*atanh({b}x).", "integrand": "{a}*atanh({b}*x)"}
+      ],
+      "ends": [
+        {"text": "Find the area-rate function whose integral gives the gap."},
+        {"text": "Write one antiderivative for the shaded area."}
+      ]
+    },
+    "piecewise": {
+      "beginnings": [
+        {"text": "{name} measures a rate that changes behavior at x = {a}."},
+        {"text": "{name} observes a machine with two operating modes."},
+        {"text": "{name} is modeling a thermostat."}
+      ],
+      "middles": [
+        {"text": "For x < {a}, the rate is x; after that it is {b}.", "integrand": "Piecewise((x, x < {a}), ({b}, True))"},
+        {"text": "Before x = {a}, the output is {b}x; afterwards it is {c}.", "integrand": "Piecewise(({b}*x, x < {a}), ({c}, True))"},
+        {"text": "The heating rate is x^2 when x < {a} and {b} when x >= {a}.", "integrand": "Piecewise((x^2, x < {a}), ({b}, True))"},
+        {"text": "The rate is {b}*x for earlier times and {c}*x + {d} later on.", "integrand": "Piecewise(({b}*x, x < {a}), ({c}*x+{d}, True))"},
+        {"text": "Before x = {a}, the rate is {b}*ln(x); afterward it is {c}.", "integrand": "Piecewise(({b}*ln(x), x < {a}), ({c}, True))"},
+        {"text": "The heater follows {b}*asinh(x) up to x = {a} and {c} afterward.", "integrand": "Piecewise(({b}*asinh(x), x < {a}), ({c}, True))"}
+      ],
+      "ends": [
+        {"text": "Find a function whose derivative matches this piecewise rule."},
+        {"text": "Construct one antiderivative of the changing rate."}
+      ]
+    }
+  }
+}

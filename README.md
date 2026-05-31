@@ -21,10 +21,19 @@ Open http://localhost:5000.
 - Integrals rendered with MathJax
 - Answers verified server-side with SymPy differentiation and simplification
 - Accepts common LaTeX-style function forms like `e^{kx}`, `\sin{kx}`, `\cos{x}`, `\tan{x}`, and `\sech{x}`
+- Supports additional parser aliases like `sin^-1(x)`, `log10(x)`, `log_2(x)`, `sin^2(x)`, and absolute values `|x|`
 - Separate local integration solver page at `/solver`
+- Experimental worded-problem page at `/worded` (explicitly marked beta on the page)
+- API documentation page at `/documentation` with matching markdown in `documentation/api.md`
+- Privacy policy page at `/privacy`
+- Q streak, daily streak, and points on the main page
+- Streak/points and theme preference are stored in browser local storage (no account required)
+- Worded problems are mix-and-match combinations of beginnings, middles, and ends from `data/word_problems.json`
 - "Give Up" reveals the stored solution
 - Daily Easy/Medium/Hard/Newton integrals, archived in `data/daily_integrals.json`
+- Core integral prompt templates are data-driven in `data/integral_templates.json`
 - Expanded integral pools with substantially more per-level variety
+- Includes launch guardrails: expression length limits, symbolic complexity caps, operation-time budgets, and per-client rate limiting
 - Daily API endpoint:
   - `GET /api/daily/<easy|medium|hard|newton>`
   - Response: `{"integral": "{mathjax integral}", "solution": "{mathjax answer}"}`

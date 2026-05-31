@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Worded Problems (Experimental) | Rapid Fire Integrals</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      window.MathJax = {
+        tex: {
+          inlineMath: [['$', '$'], ['\\(', '\\)']],
+          displayMath: [['\\[', '\\]']],
+          processEscapes: true,
+        },
+        options: {
+          skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+        },
+      };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+      :root {
+        --bg-start: #050b16;
+        --bg-mid: #0a1626;
+        --bg-end: #08101d;
+        --body-grid: rgba(148, 170, 201, 0.09);
+        --panel: rgba(12, 23, 41, 0.82);
+        --panel-border: rgba(161, 189, 255, 0.18);
+        --button-bg-start: rgba(20, 36, 60, 0.9);
+        --button-bg-end: rgba(11, 21, 39, 0.98);
+        --button-border: rgba(161, 189, 255, 0.18);
+        --input-bg: rgba(4, 10, 18, 0.68);
+        --input-border: rgba(161, 189, 255, 0.16);
+        --math-bg-start: rgba(9, 17, 31, 0.8);
+        --math-bg-end: rgba(4, 10, 18, 0.88);
+        --text: #eef4ff;
+        --muted: #9db0cc;
+        --accent: #88d8ff;
+        --accent-2: #f5b76b;
+        --success: #7ddc9f;
+        --danger: #ff8e8e;
+        --warning: #ffd166;
+        --link-bg: rgba(136, 216, 255, 0.12);
+        --link-border: rgba(136, 216, 255, 0.24);
+        --link-text: #88d8ff;
+        --shadow: 0 28px 90px rgba(0, 0, 0, 0.38);
+      }
+
+      html[data-theme='light'] {
+        --bg-start: #f5f7fb;
+        --bg-mid: #edf2f9;
+        --bg-end: #e0e8f3;
+        --body-grid: rgba(82, 101, 128, 0.12);
+        --panel: rgba(255, 255, 255, 0.88);
+        --panel-border: rgba(70, 92, 125, 0.16);
+        --button-bg-start: rgba(250, 252, 255, 0.96);
+        --button-bg-end: rgba(232, 238, 247, 0.98);
+        --button-border: rgba(70, 92, 125, 0.22);
+        --input-bg: rgba(255, 255, 255, 0.88);
+        --input-border: rgba(70, 92, 125, 0.18);
+        --math-bg-start: rgba(255, 255, 255, 0.94);
+        --math-bg-end: rgba(242, 246, 251, 0.98);
+        --text: #102033;
+        --muted: #54657f;
+        --accent: #0a7cc5;
+        --accent-2: #c46d1f;
+        --success: #137f45;
+        --danger: #b32929;
+        --warning: #ad6f00;
+        --link-bg: rgba(10, 124, 197, 0.08);
+        --link-border: rgba(10, 124, 197, 0.2);
+        --link-text: #0a7cc5;
+        --shadow: 0 28px 90px rgba(30, 41, 59, 0.16);
+      }
+
+      * { box-sizing: border-box; }
+      html, body { min-height: 100%; }
+
+      body {
+        margin: 0;
+        color: var(--text);
+        font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(136, 216, 255, 0.22), transparent 28%),
+          radial-gradient(circle at top right, rgba(245, 183, 107, 0.16), transparent 24%),
+          linear-gradient(135deg, var(--bg-start) 0%, var(--bg-mid) 50%, var(--bg-end) 100%);
+      }
+
+      body::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(var(--body-grid) 1px, transparent 1px),
+          linear-gradient(90deg, var(--body-grid) 1px, transparent 1px);
+        background-size: 72px 72px;
+        mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.5), transparent 84%);
+      }
+
+      .shell {
+        position: relative;
+        width: min(1040px, calc(100% - 28px));
+        margin: 0 auto;
+        padding: 26px 0 46px;
+      }
+
+      .hero,
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+        border-radius: 24px;
+      }
+
+      .hero {
+        padding: 24px;
+        margin-bottom: 20px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0.44rem 0.8rem;
+        border-radius: 999px;
+        background: rgba(136, 216, 255, 0.12);
+        color: var(--accent);
+        font-size: 0.76rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .experimental {
+        margin-top: 12px;
+        padding: 11px 13px;
+        border-radius: 14px;
+        border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--panel-border));
+        background: color-mix(in srgb, var(--warning) 10%, transparent);
+        color: var(--warning);
+        font-weight: 600;
+      }
+
+      h1 {
+        margin: 0.7rem 0 0;
+        font-family: 'Fraunces', 'Georgia', serif;
+        font-size: clamp(2.05rem, 5vw, 3.5rem);
+        line-height: 0.95;
+        letter-spacing: -0.04em;
+      }
+
+      .lede {
+        margin: 0.9rem 0 0;
+        color: var(--muted);
+        line-height: 1.65;
+        max-width: 70ch;
+      }
+
+      .hero-actions {
+        margin-top: 16px;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .page-link,
+      .theme-toggle,
+      button {
+        appearance: none;
+        border: 1px solid var(--button-border);
+        background: linear-gradient(180deg, var(--button-bg-start), var(--button-bg-end));
+        color: var(--text);
+        font: inherit;
+        font-weight: 700;
+        border-radius: 999px;
+        padding: 0.75rem 1rem;
+        cursor: pointer;
+        text-decoration: none;
+        transition: transform 150ms ease, box-shadow 150ms ease;
+      }
+
+      .page-link,
+      .theme-toggle {
+        border-color: var(--link-border);
+        background: var(--link-bg);
+        color: var(--link-text);
+      }
+
+      button:hover,
+      .page-link:hover,
+      .theme-toggle:hover {
+        transform: translateY(-1px);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+        gap: 20px;
+      }
+
+      .panel {
+        padding: 20px;
+      }
+
+      .panel-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+
+      .panel-title h2 {
+        margin: 0;
+        font-size: 0.96rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .subtle {
+        color: var(--accent-2);
+        font-size: 0.82rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .problem-box {
+        padding: 14px;
+        border-radius: 16px;
+        border: 1px solid var(--panel-border);
+        background: color-mix(in srgb, var(--panel) 84%, transparent);
+        line-height: 1.6;
+        min-height: 120px;
+      }
+
+      .math-block {
+        width: 100%;
+        padding: 14px 16px;
+        border-radius: 16px;
+        background: linear-gradient(180deg, var(--math-bg-start), var(--math-bg-end));
+        border: 1px solid color-mix(in srgb, var(--panel-border) 85%, transparent);
+        min-height: 92px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        overflow-x: auto;
+      }
+
+      .math-block.is-empty {
+        color: var(--muted);
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 160px;
+        border-radius: 16px;
+        border: 1px solid var(--input-border);
+        background: var(--input-bg);
+        color: var(--text);
+        padding: 14px 16px;
+        resize: vertical;
+        font: 500 1rem/1.6 'IBM Plex Mono', 'SFMono-Regular', monospace;
+      }
+
+      .button-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .status {
+        min-height: 1.5rem;
+        margin-top: 12px;
+        font-weight: 700;
+      }
+
+      .status[data-tone='success'] { color: var(--success); }
+      .status[data-tone='error'] { color: var(--danger); }
+      .status[data-tone='warning'] { color: var(--warning); }
+
+      .hint {
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      @media (max-width: 860px) {
+        .grid { grid-template-columns: 1fr; }
+      }
+
+      @media (max-width: 640px) {
+        .shell {
+          width: min(100% - 18px, 1040px);
+          padding-top: 18px;
+        }
+
+        .hero,
+        .panel {
+          border-radius: 18px;
+          padding: 16px;
+        }
+
+        .button-row button,
+        .page-link,
+        .theme-toggle {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="eyebrow">Rapid Fire Integrals</div>
+        <h1>Worded Problems</h1>
+        <p class="lede">
+          Translate scenario text into antiderivatives. This page keeps the same symbolic checker,
+          but uses prompt-style problem statements instead of raw formulas.
+        </p>
+        <div class="experimental">
+          Experimental mode: prompts and phrasing are generated and may evolve quickly.
+          Treat this as beta behavior.
+        </div>
+        <div class="hero-actions">
+          <a class="page-link" href="/">Back to practice</a>
+          <a class="page-link" href="/documentation">API docs</a>
+          <button id="theme-toggle" class="theme-toggle" type="button">Toggle theme</button>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-title">
+            <h2>Prompt</h2>
+            <div class="subtle">Generated scenario</div>
+          </div>
+          <div id="category" class="hint" style="margin-top:-4px;margin-bottom:10px">Category: story</div>
+          <div id="prompt" class="problem-box">Click “New Problem” to generate a scenario.</div>
+          <div class="hint">Target rate to integrate:</div>
+          <div id="target" class="math-block is-empty">No target loaded yet.</div>
+          <div class="button-row">
+            <button id="new-problem" type="button">New Problem</button>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-title">
+            <h2>Your Answer</h2>
+            <div class="subtle">Any equivalent form</div>
+          </div>
+          <textarea id="answer" placeholder="Enter an antiderivative in plain text or LaTeX"></textarea>
+          <div class="button-row">
+            <button id="check" type="button">Check</button>
+            <button id="reveal" type="button">Reveal Solution</button>
+          </div>
+          <div id="status" class="status"></div>
+          <div class="hint">Revealed solution:</div>
+          <div id="solution" class="math-block is-empty">No revealed solution yet.</div>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      const promptNode = document.getElementById('prompt');
+      const categoryNode = document.getElementById('category');
+      const targetNode = document.getElementById('target');
+      const answerNode = document.getElementById('answer');
+      const statusNode = document.getElementById('status');
+      const solutionNode = document.getElementById('solution');
+      const themeToggleNode = document.getElementById('theme-toggle');
+      const themeStorageKey = 'rapidfireintegrals-theme';
+
+      function getPreferredTheme() {
+        const savedTheme = window.localStorage.getItem(themeStorageKey);
+        if (savedTheme === 'light' || savedTheme === 'dark') {
+          return savedTheme;
+        }
+        return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      }
+
+      function applyTheme(theme) {
+        document.documentElement.dataset.theme = theme;
+        window.localStorage.setItem(themeStorageKey, theme);
+        themeToggleNode.textContent = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
+      }
+
+      function typesetNode(node) {
+        if (window.MathJax?.typesetPromise) {
+          window.MathJax.typesetPromise([node]).catch(() => {});
+        }
+      }
+
+      function setMath(node, latex) {
+        node.classList.remove('is-empty');
+        node.textContent = `\\[${latex}\\]`;
+        typesetNode(node);
+      }
+
+      function setStatus(message = '', tone = 'warning') {
+        statusNode.textContent = message;
+        statusNode.dataset.tone = tone;
+      }
+
+      async function requestNewProblem() {
+        setStatus('Generating a new worded problem...', 'warning');
+        solutionNode.classList.add('is-empty');
+        solutionNode.textContent = 'No revealed solution yet.';
+
+        const response = await fetch('/api/word-problem', { method: 'POST' });
+        const payload = await response.json();
+        if (!response.ok) {
+          setStatus(payload.error || 'Unable to generate a new problem.', 'error');
+          return;
+        }
+
+        promptNode.textContent = payload.prompt;
+        categoryNode.textContent = `Category: ${payload.category || 'story'}`;
+        setMath(targetNode, `\\displaystyle ${payload.target_latex}`);
+        setStatus('New problem ready.', 'success');
+      }
+
+      async function checkAnswer() {
+        const answer = answerNode.value.trim();
+        if (!answer) {
+          setStatus('Enter an answer first.', 'error');
+          return;
+        }
+
+        setStatus('Checking...', 'warning');
+        const response = await fetch('/api/word-problem/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ answer }),
+        });
+        const payload = await response.json();
+
+        if (!response.ok && response.status !== 400) {
+          setStatus(payload.message || payload.error || 'Unable to check right now.', 'error');
+          return;
+        }
+
+        setStatus(payload.message || 'Checked.', payload.correct ? 'success' : 'error');
+      }
+
+      async function revealSolution() {
+        setStatus('Revealing solution...', 'warning');
+        const response = await fetch('/api/word-problem/reveal', { method: 'POST' });
+        const payload = await response.json();
+        if (!response.ok) {
+          setStatus(payload.error || 'No solution available.', 'error');
+          return;
+        }
+
+        setMath(solutionNode, `\\displaystyle ${payload.latex} + C`);
+        setStatus('Solution revealed.', 'success');
+      }
+
+      applyTheme(getPreferredTheme());
+      themeToggleNode.addEventListener('click', () => {
+        applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+      });
+
+      document.getElementById('new-problem').addEventListener('click', requestNewProblem);
+      document.getElementById('check').addEventListener('click', checkAnswer);
+      document.getElementById('reveal').addEventListener('click', revealSolution);
+
+      requestNewProblem().catch(() => {
+        setStatus('Unable to initialize the experimental problem feed.', 'error');
+      });
+    </script>
+  </body>
+</html>

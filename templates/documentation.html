@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>API Documentation | Rapid Fire Integrals</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg-start: #050b16;
+        --bg-mid: #0a1626;
+        --bg-end: #08101d;
+        --body-grid: rgba(148, 170, 201, 0.09);
+        --panel: rgba(12, 23, 41, 0.82);
+        --panel-border: rgba(161, 189, 255, 0.18);
+        --button-bg-start: rgba(20, 36, 60, 0.9);
+        --button-bg-end: rgba(11, 21, 39, 0.98);
+        --button-border: rgba(161, 189, 255, 0.18);
+        --text: #eef4ff;
+        --muted: #9db0cc;
+        --accent: #88d8ff;
+        --accent-2: #f5b76b;
+        --shadow: 0 28px 90px rgba(0, 0, 0, 0.38);
+      }
+
+      html[data-theme='light'] {
+        --bg-start: #f5f7fb;
+        --bg-mid: #edf2f9;
+        --bg-end: #e0e8f3;
+        --body-grid: rgba(82, 101, 128, 0.12);
+        --panel: rgba(255, 255, 255, 0.88);
+        --panel-border: rgba(70, 92, 125, 0.16);
+        --button-bg-start: rgba(250, 252, 255, 0.96);
+        --button-bg-end: rgba(232, 238, 247, 0.98);
+        --button-border: rgba(70, 92, 125, 0.22);
+        --text: #102033;
+        --muted: #54657f;
+        --accent: #0a7cc5;
+        --accent-2: #c46d1f;
+        --shadow: 0 28px 90px rgba(30, 41, 59, 0.16);
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        color: var(--text);
+        font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(136, 216, 255, 0.22), transparent 28%),
+          radial-gradient(circle at top right, rgba(245, 183, 107, 0.16), transparent 24%),
+          linear-gradient(135deg, var(--bg-start) 0%, var(--bg-mid) 50%, var(--bg-end) 100%);
+        min-height: 100vh;
+      }
+
+      body::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(var(--body-grid) 1px, transparent 1px),
+          linear-gradient(90deg, var(--body-grid) 1px, transparent 1px);
+        background-size: 72px 72px;
+        mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.5), transparent 84%);
+      }
+
+      .shell {
+        width: min(1000px, calc(100% - 28px));
+        margin: 0 auto;
+        padding: 28px 0 44px;
+      }
+
+      .hero,
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+        border-radius: 24px;
+      }
+
+      .hero {
+        padding: 24px;
+        margin-bottom: 20px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        padding: 0.45rem 0.8rem;
+        border-radius: 999px;
+        background: rgba(136, 216, 255, 0.12);
+        color: var(--accent);
+        font-size: 0.78rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h1, h2 {
+        margin: 0;
+        font-family: 'Fraunces', 'Georgia', serif;
+      }
+
+      h1 {
+        margin-top: 0.75rem;
+        font-size: clamp(2rem, 4vw, 3.6rem);
+      }
+
+      .lede,
+      p,
+      li {
+        color: var(--muted);
+        line-height: 1.65;
+      }
+
+      .hero-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 16px;
+      }
+
+      .theme-toggle {
+        cursor: pointer;
+      }
+
+      a,
+      .button-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 0.75rem 1rem;
+        border-radius: 999px;
+        border: 1px solid var(--button-border);
+        background: linear-gradient(180deg, var(--button-bg-start), var(--button-bg-end));
+        color: var(--text);
+        text-decoration: none;
+        font-weight: 700;
+      }
+
+      .panel {
+        padding: 20px;
+        margin-top: 18px;
+      }
+
+      .section-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .section-title span {
+        color: var(--accent-2);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 0.82rem;
+      }
+
+      code, pre {
+        font-family: 'IBM Plex Mono', 'SFMono-Regular', monospace;
+      }
+
+      pre {
+        padding: 14px;
+        overflow: auto;
+        border-radius: 16px;
+        background: rgba(4, 10, 18, 0.56);
+        border: 1px solid var(--panel-border);
+        color: var(--text);
+      }
+
+      .muted-note {
+        font-size: 0.9rem;
+        margin-top: 8px;
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 20px;
+      }
+
+      @media (max-width: 640px) {
+        .shell { width: min(100% - 18px, 1000px); }
+        .hero, .panel { border-radius: 18px; padding: 16px; }
+        a, .button-link { width: 100%; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="eyebrow">Rapid Fire Integrals</div>
+        <h1>API Documentation</h1>
+        <p class="lede">
+          This page documents the app's JSON endpoints, including the experimental worded-problem
+          flow. The app is intentionally lightweight and may change.
+        </p>
+        <div class="hero-actions">
+          <a href="/">Back to practice</a>
+          <a href="/worded">Worded problems</a>
+          <a href="/solver">Integration solver</a>
+          <a href="/privacy">Privacy policy</a>
+          <button id="theme-toggle" class="button-link theme-toggle" type="button">Toggle theme</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-title">
+          <h2>Core Endpoints</h2>
+          <span>JSON</span>
+        </div>
+        <ul>
+          <li><code>POST /api/solve</code> - integrate an expression locally with SymPy. Body: <code>{"expression": "x^2", "variable": "x"}</code>.</li>
+          <li><code>GET /api/daily/&lt;easy|medium|hard|newton&gt;</code> - fetch or create the daily integral for a level.</li>
+        </ul>
+      </section>
+
+      <section class="panel">
+        <div class="section-title">
+          <h2>Experimental Worded Flow</h2>
+          <span>beta</span>
+        </div>
+        <ul>
+          <li><code>POST /api/word-problem</code> - create a session-backed word problem. Returns prompt text, category, and the target LaTeX.</li>
+          <li><code>POST /api/word-problem/check</code> - check a submitted answer against the current session problem. Body: <code>{"answer": "..."}</code>.</li>
+          <li><code>POST /api/word-problem/reveal</code> - reveal the current solution in both raw SymPy and LaTeX forms.</li>
+        </ul>
+        <p class="muted-note">
+          The worded page at <code>/worded</code> is marked experimental on purpose. Prompt styles, categories, and wording may change without notice.
+        </p>
+      </section>
+
+      <section class="panel">
+        <div class="section-title">
+          <h2>Notes</h2>
+          <span>behavior</span>
+        </div>
+        <ul>
+          <li>Responses are JSON unless a rate limit or validation error occurs.</li>
+          <li>Rate limits apply to the solver and the experimental worded-problem endpoints.</li>
+          <li>Worded problems are generated from the JSON bank in <code>data/word_problems.json</code>.</li>
+          <li>Theme preference, Q streak, daily streak, and points are stored in local browser storage only.</li>
+          <li>No account system exists, and no personal profile is required to practice.</li>
+        </ul>
+      </section>
+    </main>
+
+    <script>
+      const themeStorageKey = 'rapidfireintegrals-theme';
+      const themeToggleNode = document.getElementById('theme-toggle');
+
+      function getPreferredTheme() {
+        const savedTheme = window.localStorage.getItem(themeStorageKey);
+        if (savedTheme === 'light' || savedTheme === 'dark') {
+          return savedTheme;
+        }
+        return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      }
+
+      function applyTheme(theme) {
+        document.documentElement.dataset.theme = theme;
+        window.localStorage.setItem(themeStorageKey, theme);
+        themeToggleNode.textContent = theme === 'dark' ? 'Switch to light' : 'Switch to dark';
+      }
+
+      applyTheme(getPreferredTheme());
+      themeToggleNode.addEventListener('click', () => {
+        applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+      });
+    </script>
+  </body>
+</html>
