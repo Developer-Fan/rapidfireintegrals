@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import threading
+import time
 from datetime import date
 from pathlib import Path
 from urllib.parse import quote_plus
@@ -12,12 +14,13 @@ from flask import Flask, jsonify, render_template, request
 from flask_socketio import SocketIO, emit
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "rapidfireintegrals-secret"
+app.config["SECRET_KEY"] = os.environ.get("RAPIDFIRE_SECRET_KEY", "dev-secret-change-me")
 socketio = SocketIO(app, async_mode="threading")
 
 NEWTON_API = "https://newton.vercel.app/api/v2"
 DATA_FILE = Path(__file__).parent / "data" / "daily_integrals.json"
 SUPPORTED_LEVELS = {"easy", "medium", "hard", "newton"}
+SESSION_TTL_SECONDS = 3600
 
 session_state: dict[str, dict[str, str]] = {}
 state_lock = threading.Lock()
@@ -38,7 +41,18 @@ def _clean_expression(expression: str) -> str:
 
 
 def _normalize_newton_expression(expression: str) -> str:
-    return "".join(expression.split()).replace("(", "").replace(")", "")
+    return "".join(expression.split())
+
+
+def _prune_sessions_locked() -> None:
+    now = time.time()
+    stale_sids = [
+        sid
+        for sid, data in session_state.items()
+        if now - float(data.get("created_at", now)) > SESSION_TTL_SECONDS
+    ]
+    for sid in stale_sids:
+        session_state.pop(sid, None)
 
 
 def check_answer_with_newton(user_answer: str, expected_integrand: str) -> bool:
@@ -199,7 +213,10 @@ def handle_request_integral(payload: dict | None = None):
     level = payload.get("level", "easy")
     challenge = generate_integral(level)
 
-    session_state[request.sid] = challenge
+    with state_lock:
+        _prune_sessions_locked()
+        challenge["created_at"] = str(time.time())
+        session_state[request.sid] = challenge
     emit("integral", {"integral": challenge["integral"], "level": level})
 
 
@@ -209,7 +226,10 @@ def handle_request_daily(payload: dict | None = None):
     level = payload.get("level", "easy")
     challenge = get_daily_integral(level)
 
-    session_state[request.sid] = challenge
+    with state_lock:
+        _prune_sessions_locked()
+        challenge["created_at"] = str(time.time())
+        session_state[request.sid] = challenge
     emit("integral", {"integral": challenge["integral"], "level": f"daily-{level}"})
 
 
@@ -217,7 +237,9 @@ def handle_request_daily(payload: dict | None = None):
 def handle_submit_answer(payload: dict | None = None):
     payload = payload or {}
     answer = payload.get("answer", "")
-    challenge = session_state.get(request.sid)
+    with state_lock:
+        _prune_sessions_locked()
+        challenge = session_state.get(request.sid)
 
     if not challenge:
         emit(
@@ -244,7 +266,9 @@ def handle_submit_answer(payload: dict | None = None):
 
 @socketio.on("give_up")
 def handle_give_up():
-    challenge = session_state.get(request.sid)
+    with state_lock:
+        _prune_sessions_locked()
+        challenge = session_state.get(request.sid)
     if not challenge:
         emit("result", {"correct": False, "message": "No active integral."})
         return
@@ -260,7 +284,8 @@ def handle_give_up():
 
 @socketio.on("disconnect")
 def handle_disconnect():
-    session_state.pop(request.sid, None)
+    with state_lock:
+        session_state.pop(request.sid, None)
 
 
 if __name__ == "__main__":
