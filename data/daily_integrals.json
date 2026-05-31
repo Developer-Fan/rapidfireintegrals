@@ -1,0 +1,9 @@
+{
+  "easy": {
+    "2026-05-31": {
+      "expression": "(6*x)/(1+x^2)",
+      "integral": "\\int \\\\frac{6x}{1+x^2}\\,dx",
+      "solution": "x^2/2"
+    }
+  }
+}

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rapid Fire Integrals</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script>
+      window.MathJax = { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] } };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; max-width: 900px; }
+      .row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+      button { padding: 0.5rem 0.7rem; }
+      textarea { width: 100%; min-height: 80px; }
+      #integral, #preview, #status { margin: 1rem 0; font-size: 1.1rem; }
+      .hint { color: #666; }
+    </style>
+  </head>
+  <body>
+    <h1>Rapid Fire Integrals</h1>
+
+    <div class="row">
+      <button data-level="easy" class="rapid">Easy</button>
+      <button data-level="medium" class="rapid">Medium</button>
+      <button data-level="hard" class="rapid">Hard</button>
+      <button data-level="newton" class="rapid">Newton</button>
+    </div>
+
+    <div class="row">
+      <button data-level="easy" class="daily">Daily Easy</button>
+      <button data-level="medium" class="daily">Daily Medium</button>
+      <button data-level="hard" class="daily">Daily Hard</button>
+      <button data-level="newton" class="daily">Daily Newton</button>
+    </div>
+
+    <div id="integral">Select a difficulty to start.</div>
+
+    <label for="answer">Your answer (LaTeX/plain expression):</label>
+    <textarea id="answer" placeholder="e.g. x^2*sin(x)-2*sin(x)+2*x*cos(x)"></textarea>
+    <div class="hint">Live MathJax preview:</div>
+    <div id="preview">\(\)</div>
+
+    <div class="row">
+      <button id="submit">Submit Answer</button>
+      <button id="giveup">Give Up</button>
+    </div>
+
+    <div id="status"></div>
+
+    <script>
+      const socket = io();
+      const integralNode = document.getElementById('integral');
+      const answerNode = document.getElementById('answer');
+      const statusNode = document.getElementById('status');
+      const previewNode = document.getElementById('preview');
+
+      function renderMath() {
+        previewNode.textContent = `\\(${answerNode.value || ''}\\)`;
+        if (window.MathJax?.typesetPromise) {
+          window.MathJax.typesetPromise([previewNode]).catch(() => {});
+        }
+      }
+
+      answerNode.addEventListener('input', renderMath);
+
+      document.querySelectorAll('.rapid').forEach((button) => {
+        button.addEventListener('click', () => {
+          statusNode.textContent = '';
+          answerNode.value = '';
+          renderMath();
+          socket.emit('request_integral', { level: button.dataset.level });
+        });
+      });
+
+      document.querySelectorAll('.daily').forEach((button) => {
+        button.addEventListener('click', () => {
+          statusNode.textContent = '';
+          answerNode.value = '';
+          renderMath();
+          socket.emit('request_daily', { level: button.dataset.level });
+        });
+      });
+
+      document.getElementById('submit').addEventListener('click', () => {
+        socket.emit('submit_answer', { answer: answerNode.value });
+      });
+
+      document.getElementById('giveup').addEventListener('click', () => {
+        socket.emit('give_up');
+      });
+
+      socket.on('integral', (payload) => {
+        integralNode.textContent = `\\(${payload.integral}\\)`;
+        if (window.MathJax?.typesetPromise) {
+          window.MathJax.typesetPromise([integralNode]).catch(() => {});
+        }
+      });
+
+      socket.on('result', (payload) => {
+        statusNode.textContent = payload.message;
+      });
+    </script>
+  </body>
+</html>
