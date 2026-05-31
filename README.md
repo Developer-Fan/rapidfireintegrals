@@ -7,6 +7,16 @@ python -m pip install -r requirements.txt
 python app.py
 ```
 
+## Render Deployment
+The repository includes a `render.yaml` for Render Web Services. It installs the Python dependencies and
+starts the app with Gunicorn + eventlet so Socket.IO upgrades work in production.
+
+If you deploy manually, use:
+
+```bash
+RAPIDFIRE_ASYNC_MODE=eventlet gunicorn -k eventlet -w 1 -b 0.0.0.0:$PORT app:app
+```
+
 Socket.IO defaults to `threading` mode for stable local development.
 To opt into eventlet explicitly:
 

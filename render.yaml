@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: rapidfireintegrals
+    env: python
+    buildCommand: python -m pip install -r requirements.txt
+    startCommand: RAPIDFIRE_ASYNC_MODE=eventlet gunicorn -k eventlet -w 1 -b 0.0.0.0:$PORT app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: RAPIDFIRE_ASYNC_MODE
+        value: eventlet
